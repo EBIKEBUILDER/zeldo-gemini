@@ -108,9 +108,9 @@ export class BabylonRenderer {
     this.dungeonRoot = new TransformNode('dungeon_root', this.scene);
     this.dungeonRoot.setEnabled(false);
 
-    // Camera setup with classic Zelda downward tilt
+    // Camera setup with classic Zeldo downward tilt
     this.camera = new UniversalCamera(
-      'zelda_cam',
+      'zeldo_cam',
       new Vector3(7.5, CAMERA_OFFSET.y, 6.0 + CAMERA_OFFSET.z),
       this.scene
     );

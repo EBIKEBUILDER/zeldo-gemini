@@ -16,7 +16,7 @@ export const TitleScreen: React.FC = () => {
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(16,185,129,0.15)_0%,transparent_70%)] pointer-events-none" />
 
       <div className="relative max-w-xl w-full flex flex-col items-center text-center gap-6 py-8">
-        {/* Emblem / Triforce Crest */}
+        {/* Emblem / Zeldo Crest */}
         <div className="relative flex items-center justify-center">
           <div className="w-20 h-20 bg-gradient-to-tr from-amber-500 to-yellow-300 rotate-45 rounded-lg border-2 border-amber-200/90 shadow-[0_0_35px_rgba(245,158,11,0.5)] flex items-center justify-center">
             <Sword className="w-10 h-10 text-zinc-900 -rotate-45" />

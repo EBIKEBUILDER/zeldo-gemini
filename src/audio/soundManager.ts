@@ -284,7 +284,7 @@ class SoundManager {
     osc.stop(now + 0.16);
   }
 
-  // 10. Key Pickup: triumphant Zelda-style 4-note stinger
+  // 10. Key Pickup: triumphant Zeldo-style 4-note stinger
   public playKeyPickup() {
     this.initContext();
     if (!this.ctx || !this.sfxGain || this.isMuted) return;

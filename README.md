@@ -1,6 +1,6 @@
 # ⚔️ Zeldo: Quest of the Bramble King
 
-A complete, playable 3D Zelda-like browser game inspired by the structure, quest flow, and aesthetic charm of *A Link to the Past*, rendered as a vibrant low-poly overhead adventure.
+A complete, playable 3D Zeldo-like browser game inspired by classic overhead adventure structure, rendered as a vibrant low-poly overhead adventure.
 
 ---
 
