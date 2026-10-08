@@ -356,9 +356,9 @@ export function generateDungeon(): MapData {
     }
   }
 
-  // Room 1: Sanctum Antechamber (x: 4 to 15, z: 2 to 11)
+  // Room 1: Sanctum Antechamber (x: 4 to 15, z: 2 to 10)
   for (let x = 4; x <= 15; x++) {
-    for (let z = 2; z <= 11; z++) {
+    for (let z = 2; z <= 10; z++) {
       tiles[x][z] = { type: 'stone_floor', solid: false };
     }
   }
@@ -374,12 +374,11 @@ export function generateDungeon(): MapData {
   tiles[9][1] = { type: 'doorway', solid: false };
   tiles[10][1] = { type: 'doorway', solid: false };
 
-  // Doorway / Gate portal between Room 1 and Room 2 at z = 11 to 12
-  // We allow walking through once gate is open; the Gate prop mesh will handle physical blocking when closed.
+  // Doorway / Gate portal through dividing wall at z = 11 (x = 9, 10)
+  // The dividing wall at z = 11 blocks the rest of the boundary (x: 3..8 and 11..16).
+  // The doorway allows passage only once the Dungeon Gate is unlocked with the key.
   tiles[9][11] = { type: 'stone_floor', solid: false };
   tiles[10][11] = { type: 'stone_floor', solid: false };
-  tiles[9][12] = { type: 'stone_floor', solid: false };
-  tiles[10][12] = { type: 'stone_floor', solid: false };
 
   // Props (Pedestal for key, Stone Pillars, Wall Torches, Chest)
   const props: WorldProp[] = [];
@@ -413,9 +412,10 @@ export function generateDungeon(): MapData {
     });
   });
 
-  // Wall Torches in Antechamber and Boss Chamber
+  // Wall Torches in Antechamber, Gate Dividing Wall, and Boss Chamber
   const torchCoords: [number, number][] = [
     [4.2, 5.0], [15.2, 5.0], [4.2, 9.0], [15.2, 9.0],
+    [8.2, 10.6], [11.8, 10.6], // Flanking the sealed Dungeon Gate
     [3.2, 14.0], [16.2, 14.0], [3.2, 20.0], [16.2, 20.0],
     [9.0, 22.2], [11.0, 22.2],
   ];
@@ -429,13 +429,13 @@ export function generateDungeon(): MapData {
     });
   });
 
-  // The Golden Treasure Chest in the Boss Chamber
+  // The Golden Treasure Chest in the Boss Chamber (unspawned/non-colliding until Gorgoth is slain)
   props.push({
     id: 'treasure_chest',
     type: 'chest',
     x: DUNGEON_BOSS_SPAWN_POS.x,
     z: DUNGEON_BOSS_SPAWN_POS.z + 0.5,
-    radius: 0.65,
+    radius: 0,
   });
 
   // Breakables in Dungeon (Pots in corners)

@@ -71,6 +71,25 @@ export interface EnemyState {
   spawnX: number;
   spawnZ: number;
   mapId: MapId;
+  poiseTimer?: number;
+  rangedCooldown?: number;
+  castTimer?: number;
+  steeringBias?: number;
+}
+
+export interface ProjectileState {
+  id: string;
+  x: number;
+  z: number;
+  vx: number;
+  vz: number;
+  radius: number;
+  damage: number;
+  life: number;
+  maxLife: number;
+  source: 'boss' | 'player' | 'enemy';
+  color?: string;
+  mapId: MapId;
 }
 
 export type BreakableType = 'grass' | 'pot';

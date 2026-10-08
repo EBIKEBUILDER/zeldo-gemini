@@ -263,16 +263,21 @@ export function createGrassMesh(scene: Scene): TransformNode {
   const root = new TransformNode('grass_tuft_root', scene);
   const grassMat = palette.get(scene, 'grass_tuft', new Color3(0.24, 0.72, 0.28), new Color3(0.05, 0.05, 0.05));
 
-  const blade1 = MeshBuilder.CreatePlane('blade1', { width: 0.5, height: 0.45 }, scene);
-  blade1.material = grassMat;
-  blade1.position.y = 0.22;
-  blade1.parent = root;
+  // Randomize between 2, 3, and 4 billboard planes for varied bushiness
+  const planeCount = Math.floor(Math.random() * 3) + 2; // 2, 3, or 4
+  const baseAngle = Math.random() * Math.PI;
 
-  const blade2 = MeshBuilder.CreatePlane('blade2', { width: 0.5, height: 0.45 }, scene);
-  blade2.material = grassMat;
-  blade2.rotation.y = Math.PI / 2;
-  blade2.position.y = 0.22;
-  blade2.parent = root;
+  for (let i = 0; i < planeCount; i++) {
+    const angle = baseAngle + (Math.PI / planeCount) * i;
+    const width = 0.48 + (Math.random() - 0.5) * 0.08;
+    const height = 0.44 + (Math.random() - 0.5) * 0.06;
+
+    const blade = MeshBuilder.CreatePlane(`blade_${i}`, { width, height }, scene);
+    blade.material = grassMat;
+    blade.rotation.y = angle;
+    blade.position.y = height * 0.5;
+    blade.parent = root;
+  }
 
   return root;
 }
@@ -377,38 +382,115 @@ export function createKeyMesh(scene: Scene): TransformNode {
   const keyMat = palette.get(
     scene,
     'dungeon_key_gold',
-    new Color3(1.0, 0.82, 0.15),
-    new Color3(0.8, 0.8, 0.4),
-    new Color3(0.4, 0.3, 0.05)
+    new Color3(1.0, 0.85, 0.2),
+    new Color3(0.95, 0.9, 0.5),
+    new Color3(0.65, 0.5, 0.1)
   );
 
+  // Key bow (circular loop) standing upright in XY plane aligned with stem and teeth
   const loop = MeshBuilder.CreateTorus('key_loop', {
-    diameter: 0.32,
-    thickness: 0.08,
-    tessellation: 8,
+    diameter: 0.38,
+    thickness: 0.09,
+    tessellation: 16,
   }, scene);
   loop.material = keyMat;
+  loop.rotation.x = Math.PI / 2; // Rotate 90 degrees so loop stands upright and lines up with key body
+  loop.position.y = 0.20;
   loop.parent = root;
 
+  // Decorative collar ring joining the bow seamlessly to the shaft
+  const collar = MeshBuilder.CreateCylinder('key_collar', {
+    diameter: 0.13,
+    height: 0.06,
+    tessellation: 8,
+  }, scene);
+  collar.material = keyMat;
+  collar.position.y = 0.02;
+  collar.parent = root;
+
+  // Stem (shaft) running downward through center
   const stem = MeshBuilder.CreateCylinder('key_stem', {
-    diameter: 0.08,
-    height: 0.55,
-    tessellation: 6,
+    diameter: 0.085,
+    height: 0.50,
+    tessellation: 8,
   }, scene);
   stem.material = keyMat;
-  stem.position.y = -0.35;
+  stem.position.y = -0.12;
   stem.parent = root;
 
+  // Teeth at bottom of stem
   const teeth = MeshBuilder.CreateBox('key_teeth', {
-    width: 0.16,
-    height: 0.14,
-    depth: 0.06,
+    width: 0.18,
+    height: 0.16,
+    depth: 0.07,
   }, scene);
   teeth.material = keyMat;
-  teeth.position.set(0.1, -0.5, 0);
+  teeth.position.set(0.11, -0.27, 0);
   teeth.parent = root;
 
-  root.scaling.set(0.85, 0.85, 0.85);
+  // Additional bit notch for ornate antique key look
+  const bit2 = MeshBuilder.CreateBox('key_teeth_notch', {
+    width: 0.12,
+    height: 0.08,
+    depth: 0.07,
+  }, scene);
+  bit2.material = keyMat;
+  bit2.position.set(0.08, -0.16, 0);
+  bit2.parent = root;
+
+  root.scaling.set(1.15, 1.15, 1.15);
+  return root;
+}
+
+export function createBrambleProjectileMesh(scene: Scene): TransformNode {
+  const root = new TransformNode('bramble_proj_root', scene);
+
+  const coreMat = palette.get(
+    scene,
+    'bramble_proj_core',
+    new Color3(0.35, 0.85, 0.25),
+    new Color3(0.8, 1.0, 0.6),
+    new Color3(0.4, 0.75, 0.2)
+  );
+  const thornMat = palette.get(
+    scene,
+    'bramble_proj_thorns',
+    new Color3(0.18, 0.45, 0.15),
+    new Color3(0.4, 0.7, 0.3),
+    new Color3(0.15, 0.35, 0.1)
+  );
+
+  // Glowing toxic bramble core orb
+  const core = MeshBuilder.CreateSphere('proj_core', {
+    diameter: 0.36,
+    segments: 6,
+  }, scene);
+  core.material = coreMat;
+  core.parent = root;
+
+  // 4 Cardinal briar thorns
+  const thornOffsets: [number, number, number, number, number, number][] = [
+    [0.22, 0, 0, 0, 0, -Math.PI / 2],
+    [-0.22, 0, 0, 0, 0, Math.PI / 2],
+    [0, 0.22, 0, 0, 0, 0],
+    [0, -0.22, 0, Math.PI, 0, 0],
+    [0, 0, 0.22, Math.PI / 2, 0, 0],
+    [0, 0, -0.22, -Math.PI / 2, 0, 0],
+  ];
+
+  thornOffsets.forEach(([px, py, pz, rx, ry, rz], idx) => {
+    const thorn = MeshBuilder.CreateCylinder(`proj_thorn_${idx}`, {
+      diameterTop: 0.0,
+      diameterBottom: 0.12,
+      height: 0.22,
+      tessellation: 4,
+    }, scene);
+    thorn.material = thornMat;
+    thorn.position.set(px, py, pz);
+    thorn.rotation.set(rx, ry, rz);
+    thorn.parent = root;
+  });
+
   return root;
 }
 

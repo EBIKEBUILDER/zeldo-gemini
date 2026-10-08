@@ -30,6 +30,7 @@ import {
   createRupeeMesh,
   createHeartMesh,
   createKeyMesh,
+  createBrambleProjectileMesh,
   createFacetedTree,
   createRockMesh,
   createCottageMesh,
@@ -63,6 +64,7 @@ export class BabylonRenderer {
   private enemyMeshes: Map<string, EnemyMeshes> = new Map();
   private breakableMeshes: Map<string, TransformNode> = new Map();
   private pickupMeshes: Map<string, TransformNode> = new Map();
+  private projectileMeshes: Map<string, TransformNode> = new Map();
   private particleMeshes: Map<string, Mesh> = new Map();
 
   // Props
@@ -200,7 +202,11 @@ export class BabylonRenderer {
       else if (pickup.type === 'key') node = createKeyMesh(this.scene);
 
       if (node) {
-        node.position.set(pickup.x, 0.45, pickup.z);
+        const initY = pickup.type === 'key' ? 1.15 : 0.45;
+        node.position.set(pickup.x, initY, pickup.z);
+        if (pickup.type === 'key') {
+          node.rotation.x = 0.25;
+        }
         this.pickupMeshes.set(pickup.id, node);
       }
     });
@@ -331,9 +337,10 @@ export class BabylonRenderer {
       for (let z = 0; z < map.height; z++) {
         const tile = map.tiles[x][z];
         const isWall = tile.type === 'dungeon_wall';
-        // South facing walls (z <= 1) are low cutaway walls (height 1.0) so the player is never occluded near the doorway
-        const wallHeight = isWall ? (z <= 1 ? 1.0 : 3.0) : 0.2;
-        const wallPosY = isWall ? (z <= 1 ? 0.5 : 1.5) : -0.1;
+        // South facing walls (z <= 1) are low cutaway walls (height 1.0) so the player is never occluded near the doorway.
+        // The dividing wall at z = 11 is 2.4 height, matching gate height while keeping visibility clear when entering boss chamber.
+        const wallHeight = isWall ? (z <= 1 ? 1.0 : (z === 11 ? 2.4 : 3.0)) : 0.2;
+        const wallPosY = isWall ? (z <= 1 ? 0.5 : (z === 11 ? 1.2 : 1.5)) : -0.1;
 
         const tileMesh = MeshBuilder.CreateBox(
           `d_tile_${x}_${z}`,
@@ -492,6 +499,15 @@ export class BabylonRenderer {
     });
 
     // 6. Update Pickups (Rupees, Hearts, Key)
+    const activePickupIds = new Set(store.pickups.map((p) => p.id));
+
+    this.pickupMeshes.forEach((node, id) => {
+      if (!activePickupIds.has(id)) {
+        node.dispose();
+        this.pickupMeshes.delete(id);
+      }
+    });
+
     store.pickups.forEach((pickup) => {
       let node = this.pickupMeshes.get(pickup.id);
 
@@ -510,8 +526,15 @@ export class BabylonRenderer {
         node.setEnabled(isVisible);
 
         if (isVisible) {
-          node.position.set(pickup.x, 0.45 + Math.sin(pickup.bobOffset) * 0.12, pickup.z);
-          node.rotation.y += 0.04;
+          if (pickup.type === 'key') {
+            // Golden dungeon key hovers majestically above the pedestal (pedestal height is 0.65)
+            node.position.set(pickup.x, 1.15 + Math.sin(pickup.bobOffset) * 0.08, pickup.z);
+            node.rotation.y += 0.035;
+            node.rotation.x = 0.25;
+          } else {
+            node.position.set(pickup.x, 0.45 + Math.sin(pickup.bobOffset) * 0.12, pickup.z);
+            node.rotation.y += 0.04;
+          }
         }
       }
     });
@@ -557,12 +580,40 @@ export class BabylonRenderer {
       mesh.position.set(p.x, p.y, p.z);
       mesh.scaling.setAll(p.life / p.maxLife);
     });
+
+    // 11. Update Boss Projectiles (Bramble Thorns)
+    const activeProjIds = new Set(store.projectiles.map((p) => p.id));
+
+    this.projectileMeshes.forEach((mesh, id) => {
+      if (!activeProjIds.has(id)) {
+        mesh.dispose();
+        this.projectileMeshes.delete(id);
+      }
+    });
+
+    store.projectiles.forEach((p) => {
+      let mesh = this.projectileMeshes.get(p.id);
+      if (!mesh) {
+        mesh = createBrambleProjectileMesh(this.scene);
+        this.projectileMeshes.set(p.id, mesh);
+      }
+
+      const isVisible = p.mapId === store.currentMap;
+      mesh.setEnabled(isVisible);
+      if (isVisible) {
+        mesh.position.set(p.x, 0.55, p.z);
+        mesh.rotation.y += 0.12;
+        mesh.rotation.x += 0.08;
+      }
+    });
   }
 
   public dispose() {
     this.isDisposed = true;
     window.removeEventListener('resize', this.onResize);
     palette.clear();
+    this.projectileMeshes.forEach((m) => m.dispose());
+    this.projectileMeshes.clear();
     this.scene.dispose();
     this.engine.dispose();
   }

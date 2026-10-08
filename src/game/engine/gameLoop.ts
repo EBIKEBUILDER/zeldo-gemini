@@ -5,6 +5,7 @@ import {
   PLAYER_ACCEL,
   PLAYER_FRICTION,
   PLAYER_RADIUS,
+  PLAYER_IFRAMES_DURATION,
   PLAYER_ATTACK_DURATION,
   PLAYER_ATTACK_COOLDOWN,
   SPAWN_POSITION,
@@ -17,15 +18,20 @@ import {
   PICKUP_MAGNET_RADIUS,
   PICKUP_COLLECT_RADIUS,
   PICKUP_MAGNET_SPEED,
+  ENEMY_SETTINGS,
 } from '../constants';
 import {
   resolveWallSliding,
   resolveCircleRepulsion,
   isInsideSwordSweep,
+  depenetrateFromObstacles,
+  isPositionBlocked,
+  hasLineOfSight,
+  resolveSmartSteering,
 } from './physics';
 import { useGameStore } from '../state/gameStore';
 import { soundManager } from '@/audio/soundManager';
-import { ParticleState, Vector2D } from '@/types/game';
+import { ParticleState, Vector2D, ProjectileState } from '@/types/game';
 
 class GameLoop {
   private isRunning: boolean = false;
@@ -41,6 +47,7 @@ class GameLoop {
     this.handleKeyDown = this.handleKeyDown.bind(this);
     this.handleKeyUp = this.handleKeyUp.bind(this);
     this.handleMouseDown = this.handleMouseDown.bind(this);
+    this.handlePointerDown = this.handlePointerDown.bind(this);
     this.tick = this.tick.bind(this);
   }
 
@@ -53,7 +60,8 @@ class GameLoop {
     if (typeof window !== 'undefined') {
       window.addEventListener('keydown', this.handleKeyDown);
       window.addEventListener('keyup', this.handleKeyUp);
-      window.addEventListener('mousedown', this.handleMouseDown);
+      window.addEventListener('pointerdown', this.handlePointerDown, { capture: true });
+      window.addEventListener('mousedown', this.handlePointerDown, { capture: true });
     }
 
     this.rafId = requestAnimationFrame(this.tick);
@@ -69,7 +77,8 @@ class GameLoop {
     if (typeof window !== 'undefined') {
       window.removeEventListener('keydown', this.handleKeyDown);
       window.removeEventListener('keyup', this.handleKeyUp);
-      window.removeEventListener('mousedown', this.handleMouseDown);
+      window.removeEventListener('pointerdown', this.handlePointerDown, { capture: true });
+      window.removeEventListener('mousedown', this.handlePointerDown, { capture: true });
     }
   }
 
@@ -98,15 +107,23 @@ class GameLoop {
     this.keys[key] = false;
   }
 
-  private handleMouseDown(e: MouseEvent) {
+  private handlePointerDown(e: PointerEvent | MouseEvent) {
     if (e.button === 0) {
-      // Left click attacks
+      // Do not trigger sword swing if clicking an interactive UI button (e.g. Mute, Retry)
+      if ((e.target as HTMLElement)?.closest('button')) {
+        return;
+      }
+
       this.mouseAttackRequested = true;
       const state = useGameStore.getState();
       if (state.gameState === 'title' || state.gameState === 'game_over' || state.gameState === 'victory') {
         state.startGame();
       }
     }
+  }
+
+  private handleMouseDown(e: MouseEvent) {
+    this.handlePointerDown(e);
   }
 
   private tick(now: number) {
@@ -142,6 +159,7 @@ class GameLoop {
     const enemies = store.enemies.map((e) => ({ ...e }));
     const breakables = store.breakables.map((b) => ({ ...b }));
     const pickups = store.pickups.map((p) => ({ ...p }));
+    const projectiles = (store.projectiles || []).map((p) => ({ ...p }));
     let activeParticles = [...store.activeParticles];
     const quest = { ...store.quest };
     const stats = { ...store.stats };
@@ -223,6 +241,16 @@ class GameLoop {
     );
     player.x = resolvedPos.x;
     player.z = resolvedPos.z;
+
+    const depenPlayer = depenetrateFromObstacles(
+      { x: player.x, z: player.z },
+      PLAYER_RADIUS,
+      currentMapData,
+      quest.dungeonGateOpen,
+      store.currentMap
+    );
+    player.x = depenPlayer.x;
+    player.z = depenPlayer.z;
 
     // --- 3. PLAYER ATTACK & SWORD HITBOX ---
     if (player.attackCooldown > 0) {
@@ -368,7 +396,6 @@ class GameLoop {
             )
           ) {
             enemy.hp -= 1;
-            enemy.hitstunTimer = 0.28;
             enemy.hitFlashTimer = 0.16;
 
             // Knockback calculation
@@ -378,9 +405,27 @@ class GameLoop {
             kx /= dist;
             kz /= dist;
 
-            const force = enemy.type === 'boss_gorgoth' ? 3.0 : 8.0;
-            enemy.vx = kx * force;
-            enemy.vz = kz * force;
+            if (enemy.type === 'boss_gorgoth') {
+              if (enemy.poiseTimer && enemy.poiseTimer > 0) {
+                // Boss Hyper-Armor Poise: Attacks cannot interrupt or knock Gorgoth back!
+                // Prevents infinite sword-spam stunlock cheese.
+                enemy.hitstunTimer = 0;
+                enemy.vx = 0;
+                enemy.vz = 0;
+              } else {
+                // Flinch briefly, then activate hyper-armor poise window
+                enemy.hitstunTimer = 0.08;
+                enemy.poiseTimer = ENEMY_SETTINGS.boss_gorgoth.poiseDuration;
+                const force = ENEMY_SETTINGS.boss_gorgoth.knockbackForce;
+                enemy.vx = kx * force;
+                enemy.vz = kz * force;
+              }
+            } else {
+              enemy.hitstunTimer = 0.28;
+              const force = 8.0;
+              enemy.vx = kx * force;
+              enemy.vz = kz * force;
+            }
 
             soundManager.playSwordHit();
             soundManager.playEnemyHurt();
@@ -432,6 +477,10 @@ class GameLoop {
               if (enemy.type === 'boss_gorgoth') {
                 quest.bossDefeated = true;
                 quest.chestSpawned = true;
+                const chestProp = currentMapData.props.find((p) => p.id === 'treasure_chest');
+                if (chestProp) {
+                  chestProp.radius = 0.65;
+                }
                 soundManager.stopMusic();
                 soundManager.playVictory();
 
@@ -474,6 +523,42 @@ class GameLoop {
           }
         }
       });
+
+      // Check hits against projectiles (Deflect/slice bramble thorns!)
+      projectiles.forEach((proj) => {
+        if (proj.mapId === store.currentMap && proj.life > 0) {
+          if (
+            isInsideSwordSweep(
+              player.x,
+              player.z,
+              player.facingAngle,
+              proj.x,
+              proj.z,
+              proj.radius,
+              1.2
+            )
+          ) {
+            proj.life = 0;
+            soundManager.playSwordHit();
+            for (let i = 0; i < 5; i++) {
+              activeParticles.push({
+                id: `proj_slice_${Date.now()}_${Math.random()}`,
+                type: 'leaf',
+                x: proj.x,
+                y: 0.6,
+                z: proj.z,
+                vx: (Math.random() - 0.5) * 4.0,
+                vy: 1.5 + Math.random() * 2.5,
+                vz: (Math.random() - 0.5) * 4.0,
+                size: 0.12,
+                color: '#7bc637',
+                life: 0.35,
+                maxLife: 0.35,
+              });
+            }
+          }
+        }
+      });
     }
 
     // --- 4. PLAYER INVULNERABILITY & BLINKING ---
@@ -509,6 +594,8 @@ class GameLoop {
       // Decrement timers
       if (enemy.hitFlashTimer > 0) enemy.hitFlashTimer = Math.max(0, enemy.hitFlashTimer - dt);
       if (enemy.attackCooldown > 0) enemy.attackCooldown = Math.max(0, enemy.attackCooldown - dt);
+      if (enemy.poiseTimer && enemy.poiseTimer > 0) enemy.poiseTimer = Math.max(0, enemy.poiseTimer - dt);
+      if (enemy.rangedCooldown !== undefined && enemy.rangedCooldown > 0) enemy.rangedCooldown = Math.max(0, enemy.rangedCooldown - dt);
 
       if (enemy.hitstunTimer > 0) {
         enemy.hitstunTimer -= dt;
@@ -544,30 +631,129 @@ class GameLoop {
 
       const aggroRadius = enemy.type === 'boss_gorgoth' ? 16.0 : 5.5;
 
-      if (!isPlayerInSpawnSafeZone && distToPlayer < aggroRadius) {
+      // Boss Gorgoth only aggros once gate is unlocked and player approaches/enters the sanctum
+      const canBossAggro =
+        enemy.type !== 'boss_gorgoth' || (quest.dungeonGateOpen && player.z >= 11.0);
+
+      if (!isPlayerInSpawnSafeZone && canBossAggro && distToPlayer < aggroRadius) {
         // Aggro & Chase!
         enemy.state = 'chase';
-        enemy.facingAngle = Math.atan2(dx, dz);
+
+        const isBoss = enemy.type === 'boss_gorgoth';
 
         // Hop cycle
-        enemy.hopCycle += dt * (enemy.type === 'boss_gorgoth' ? 4.0 : 6.0);
-
+        enemy.hopCycle += dt * (isBoss ? 4.0 : 6.0);
         const moveSpeed = enemy.speed * (0.8 + 0.4 * Math.max(0, Math.sin(enemy.hopCycle)));
-        const moveDx = (dx / distToPlayer) * moveSpeed * dt;
-        const moveDz = (dz / distToPlayer) * moveSpeed * dt;
 
-        const resolved = resolveWallSliding(
-          enemy.x,
-          enemy.z,
-          moveDx,
-          moveDz,
-          enemy.radius,
-          currentMapData,
-          quest.dungeonGateOpen,
-          store.currentMap
-        );
-        enemy.x = resolved.x;
-        enemy.z = resolved.z;
+        if (isBoss) {
+          // If boss is winding up a ranged bramble shot, pause movement to telegraph
+          if (enemy.castTimer && enemy.castTimer > 0) {
+            enemy.facingAngle = Math.atan2(dx, dz);
+            // Spawn swirling toxic briar particles
+            if (Math.random() < 0.4) {
+              activeParticles.push({
+                id: `briar_${Date.now()}_${Math.random()}`,
+                type: 'leaf',
+                x: enemy.x + (Math.random() - 0.5) * 1.3,
+                y: 0.5 + Math.random() * 0.7,
+                z: enemy.z + (Math.random() - 0.5) * 1.3,
+                vx: (Math.random() - 0.5) * 1.6,
+                vy: 1.2 + Math.random() * 1.8,
+                vz: (Math.random() - 0.5) * 1.6,
+                size: 0.12,
+                color: '#52b724',
+                life: 0.35,
+                maxLife: 0.35,
+              });
+            }
+          } else {
+            // Smart steering navigation around pillars, walls, and obstacles
+            const steer = resolveSmartSteering(
+              enemy.x,
+              enemy.z,
+              player.x,
+              player.z,
+              moveSpeed,
+              dt,
+              enemy.radius,
+              currentMapData,
+              quest.dungeonGateOpen,
+              store.currentMap,
+              enemy.steeringBias || 1
+            );
+            enemy.x = steer.x;
+            enemy.z = steer.z;
+            enemy.facingAngle = steer.facingAngle;
+            enemy.steeringBias = steer.chosenBias;
+          }
+
+          // Boss Ranged Bramble Attack
+          if (!quest.bossDefeated) {
+            if (enemy.rangedCooldown === undefined) {
+              enemy.rangedCooldown = 2.0; // initial grace period upon entering boss room
+            }
+
+            if (enemy.castTimer && enemy.castTimer > 0) {
+              enemy.castTimer -= dt;
+              if (enemy.castTimer <= 0) {
+                // Launch bramble thorn projectile towards player
+                const pDist = Math.sqrt(dx * dx + dz * dz) || 0.001;
+                const pSpeed = ENEMY_SETTINGS.boss_gorgoth.projectileSpeed;
+                projectiles.push({
+                  id: `proj_boss_${Date.now()}_${Math.random()}`,
+                  x: enemy.x + (dx / pDist) * 1.1,
+                  z: enemy.z + (dz / pDist) * 1.1,
+                  vx: (dx / pDist) * pSpeed,
+                  vz: (dz / pDist) * pSpeed,
+                  radius: ENEMY_SETTINGS.boss_gorgoth.projectileRadius,
+                  damage: ENEMY_SETTINGS.boss_gorgoth.projectileDamage,
+                  life: 3.5,
+                  maxLife: 3.5,
+                  source: 'boss',
+                  color: '#7bc637',
+                  mapId: 'dungeon',
+                });
+                soundManager.playBossShoot();
+                enemy.rangedCooldown = ENEMY_SETTINGS.boss_gorgoth.projectileCooldown + (Math.random() * 0.8 - 0.4);
+              }
+            } else if (enemy.rangedCooldown <= 0) {
+              const hasClearLoS = hasLineOfSight(
+                enemy.x,
+                enemy.z,
+                player.x,
+                player.z,
+                0.4,
+                currentMapData,
+                quest.dungeonGateOpen,
+                store.currentMap
+              );
+              // Trigger ranged attack if player is keeping distance, hiding behind a pillar, or periodically
+              if (distToPlayer > 3.0 || !hasClearLoS || distToPlayer > 2.2) {
+                enemy.castTimer = ENEMY_SETTINGS.boss_gorgoth.projectileWindup;
+              } else {
+                enemy.rangedCooldown = 1.0;
+              }
+            }
+          }
+        } else {
+          // Standard slime chase
+          enemy.facingAngle = Math.atan2(dx, dz);
+          const moveDx = (dx / distToPlayer) * moveSpeed * dt;
+          const moveDz = (dz / distToPlayer) * moveSpeed * dt;
+
+          const resolved = resolveWallSliding(
+            enemy.x,
+            enemy.z,
+            moveDx,
+            moveDz,
+            enemy.radius,
+            currentMapData,
+            quest.dungeonGateOpen,
+            store.currentMap
+          );
+          enemy.x = resolved.x;
+          enemy.z = resolved.z;
+        }
 
         // Contact damage against player
         const touchDist = enemy.radius + PLAYER_RADIUS;
@@ -635,12 +821,52 @@ class GameLoop {
       );
 
       if (repulsion) {
-        player.x += repulsion.deltaA.x;
-        player.z += repulsion.deltaA.z;
-        enemy.x += repulsion.deltaB.x;
-        enemy.z += repulsion.deltaB.z;
+        // Constrain player movement against props and walls
+        const resolvedPlayer = resolveWallSliding(
+          player.x,
+          player.z,
+          repulsion.deltaA.x,
+          repulsion.deltaA.z,
+          PLAYER_RADIUS,
+          currentMapData,
+          quest.dungeonGateOpen,
+          store.currentMap
+        );
+
+        const moveX = resolvedPlayer.x - player.x;
+        const moveZ = resolvedPlayer.z - player.z;
+        player.x = resolvedPlayer.x;
+        player.z = resolvedPlayer.z;
+
+        // If player was blocked by a wall or tree, transfer remainder to enemy
+        const extraEnemyX = repulsion.deltaA.x - moveX;
+        const extraEnemyZ = repulsion.deltaA.z - moveZ;
+
+        const resolvedEnemy = resolveWallSliding(
+          enemy.x,
+          enemy.z,
+          repulsion.deltaB.x - extraEnemyX,
+          repulsion.deltaB.z - extraEnemyZ,
+          enemy.radius,
+          currentMapData,
+          quest.dungeonGateOpen,
+          store.currentMap
+        );
+        enemy.x = resolvedEnemy.x;
+        enemy.z = resolvedEnemy.z;
       }
     });
+
+    // Safety depenetration pass after all repulsions
+    const postRepulsionDepen = depenetrateFromObstacles(
+      { x: player.x, z: player.z },
+      PLAYER_RADIUS,
+      currentMapData,
+      quest.dungeonGateOpen,
+      store.currentMap
+    );
+    player.x = postRepulsionDepen.x;
+    player.z = postRepulsionDepen.z;
 
     // Push enemies away from each other
     for (let i = 0; i < enemies.length; i++) {
@@ -658,10 +884,30 @@ class GameLoop {
         );
 
         if (repulsion) {
-          e1.x += repulsion.deltaA.x;
-          e1.z += repulsion.deltaA.z;
-          e2.x += repulsion.deltaB.x;
-          e2.z += repulsion.deltaB.z;
+          const r1 = resolveWallSliding(
+            e1.x,
+            e1.z,
+            repulsion.deltaA.x,
+            repulsion.deltaA.z,
+            e1.radius,
+            currentMapData,
+            quest.dungeonGateOpen,
+            store.currentMap
+          );
+          e1.x = r1.x;
+          e1.z = r1.z;
+          const r2 = resolveWallSliding(
+            e2.x,
+            e2.z,
+            repulsion.deltaB.x,
+            repulsion.deltaB.z,
+            e2.radius,
+            currentMapData,
+            quest.dungeonGateOpen,
+            store.currentMap
+          );
+          e2.x = r2.x;
+          e2.z = r2.z;
         }
       }
     }
@@ -678,7 +924,7 @@ class GameLoop {
 
       // Key is picked up on contact or when touching pedestal
       if (pickup.type === 'key') {
-        if (dist < 0.85) {
+        if (dist < 1.2) {
           pickup.collected = true;
           quest.hasDungeonKey = true;
           soundManager.playKeyPickup();
@@ -692,7 +938,17 @@ class GameLoop {
         return;
       }
 
-      // Magnet pull for rupees and hearts
+      // Full hearts protection:
+      // If pickup is a heart and player's health is already full, leave it on the ground!
+      const isHeart = pickup.type === 'heart';
+      const isHealthFull = player.health >= player.maxHealth;
+
+      if (isHeart && isHealthFull) {
+        pickup.magnetActive = false;
+        return;
+      }
+
+      // Magnet pull for rupees and hearts (when health is below max)
       if (dist < PICKUP_MAGNET_RADIUS) {
         pickup.magnetActive = true;
         const pullSpeed = PICKUP_MAGNET_SPEED * dt;
@@ -747,6 +1003,99 @@ class GameLoop {
 
     // Clean up collected pickups
     const activePickups = pickups.filter((p) => !p.collected);
+
+    // --- 7B. PROJECTILES SIMULATION & COLLISION ---
+    const activeProjectiles: ProjectileState[] = [];
+
+    projectiles.forEach((proj) => {
+      if (proj.mapId !== store.currentMap) return;
+
+      proj.life -= dt;
+      if (proj.life <= 0) return;
+
+      const nextX = proj.x + proj.vx * dt;
+      const nextZ = proj.z + proj.vz * dt;
+
+      // Obstacle collision test (walls, pillars, gate)
+      if (
+        isPositionBlocked(
+          nextX,
+          nextZ,
+          proj.radius,
+          currentMapData,
+          quest.dungeonGateOpen,
+          store.currentMap
+        )
+      ) {
+        // Impact particles against obstacle
+        for (let i = 0; i < 4; i++) {
+          activeParticles.push({
+            id: `proj_splat_${Date.now()}_${Math.random()}`,
+            type: 'leaf',
+            x: nextX,
+            y: 0.5,
+            z: nextZ,
+            vx: (Math.random() - 0.5) * 3.5,
+            vy: 1.0 + Math.random() * 2.0,
+            vz: (Math.random() - 0.5) * 3.5,
+            size: 0.1,
+            color: '#7bc637',
+            life: 0.3,
+            maxLife: 0.3,
+          });
+        }
+        return; // projectile destroyed on obstacle impact
+      }
+
+      proj.x = nextX;
+      proj.z = nextZ;
+
+      // Check collision with Player
+      const pDx = player.x - proj.x;
+      const pDz = player.z - proj.z;
+      const pDist = Math.sqrt(pDx * pDx + pDz * pDz);
+
+      if (pDist < proj.radius + PLAYER_RADIUS && player.iFrames <= 0) {
+        player.health = Math.max(0, player.health - proj.damage);
+        player.iFrames = PLAYER_IFRAMES_DURATION;
+        screenShake = 0.28;
+        damageFlash = 0.75;
+        soundManager.playPlayerHurt();
+
+        // Player impact sparks
+        for (let i = 0; i < 6; i++) {
+          activeParticles.push({
+            id: `proj_hit_${Date.now()}_${Math.random()}`,
+            type: 'spark',
+            x: player.x,
+            y: 0.6,
+            z: player.z,
+            vx: (Math.random() - 0.5) * 4.0,
+            vy: 1.5 + Math.random() * 2.5,
+            vz: (Math.random() - 0.5) * 4.0,
+            size: 0.1,
+            color: '#ffdd44',
+            life: 0.3,
+            maxLife: 0.3,
+          });
+        }
+
+        if (player.health <= 0) {
+          soundManager.stopMusic();
+          soundManager.playGameOver();
+          useGameStore.setState({
+            gameState: 'game_over',
+            player,
+            stats,
+          });
+          return;
+        }
+
+        return; // Consumed on player hit
+      }
+
+      activeProjectiles.push(proj);
+    });
 
     // --- 8. QUEST PROGRESSION & TRANSITIONS ---
     // A. Overworld -> Dungeon Entrance
@@ -878,6 +1227,7 @@ class GameLoop {
       enemies,
       breakables,
       pickups: activePickups,
+      projectiles: activeProjectiles,
       activeParticles,
       quest,
       stats,

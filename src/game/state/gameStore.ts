@@ -10,6 +10,7 @@ import {
   QuestState,
   GameStats,
   BannerInfo,
+  ProjectileState,
 } from '@/types/game';
 import {
   generateOverworld,
@@ -43,6 +44,7 @@ export interface GameStoreState {
   enemies: EnemyState[];
   breakables: BreakableState[];
   pickups: PickupState[];
+  projectiles: ProjectileState[];
   activeParticles: ParticleState[];
 
   // Quest & Progression
@@ -127,6 +129,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   enemies: [...initialOverworld.initialEnemies, ...initialDungeon.initialEnemies],
   breakables: [...initialOverworld.initialBreakables, ...initialDungeon.initialBreakables],
   pickups: [...initialOverworld.initialPickups, ...initialDungeon.initialPickups],
+  projectiles: [],
   activeParticles: [],
 
   quest: { ...initialQuest },
@@ -158,6 +161,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       enemies: [...overworld.initialEnemies, ...dungeon.initialEnemies],
       breakables: [...overworld.initialBreakables, ...dungeon.initialBreakables],
       pickups: [...overworld.initialPickups, ...dungeon.initialPickups],
+      projectiles: [],
       activeParticles: [],
       quest: { ...initialQuest },
       stats: {
@@ -184,6 +188,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     set({
       gameState: 'title',
       banner: null,
+      projectiles: [],
     });
   },
 
@@ -207,6 +212,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     set((state) => ({
       currentMap: mapId,
       currentAreaName: computeAreaName(mapId, x, z),
+      projectiles: [],
       player: {
         ...state.player,
         x,

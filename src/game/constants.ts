@@ -80,9 +80,15 @@ export const ENEMY_SETTINGS = {
     hp: 10,
     speed: 3.1,
     radius: 1.1,
-    damage: 2, // 1 full heart
+    damage: 2, // 1 full heart contact damage
     aggroRadius: 16.0,
-    knockbackForce: 2.5,
+    knockbackForce: 0.4, // Heavy boss - minimal flinch, no stunlock
+    poiseDuration: 0.9, // Seconds of hyper-armor where attacks cannot interrupt or push boss
+    projectileSpeed: 6.0, // Units per second for bramble thorn
+    projectileDamage: 1, // 1/2 heart damage (fair & dodgeable for first boss)
+    projectileRadius: 0.28,
+    projectileCooldown: 3.8,
+    projectileWindup: 0.4,
   },
 };
 
@@ -92,7 +98,7 @@ export const MAX_SIMULATION_SUBSTEPS = 5; // prevent spiral of death on lag spik
 
 // Magnet radius for rupees and hearts
 export const PICKUP_MAGNET_RADIUS = 2.4;
-export const PICKUP_COLLECT_RADIUS = 0.55;
+export const PICKUP_COLLECT_RADIUS = 0.75;
 export const PICKUP_MAGNET_SPEED = 7.0;
 
 // Camera configuration

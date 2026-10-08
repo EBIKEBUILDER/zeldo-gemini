@@ -19,6 +19,7 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as unknown as { __gameStore: typeof useGameStore }).__gameStore = useGameStore;
+      (window as unknown as { __gameLoop: typeof gameLoop }).__gameLoop = gameLoop;
     }
 
     const canvas = canvasRef.current;
