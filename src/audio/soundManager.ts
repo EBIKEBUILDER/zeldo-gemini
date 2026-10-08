@@ -92,6 +92,67 @@ class SoundManager {
     this.playNoiseBurst(0.08, 1200, 300, 0.2);
   }
 
+  // 1b. Dodge Roll / Dash: crisp whoosh
+  public playRoll() {
+    this.initContext();
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(320, now);
+    osc.frequency.exponentialRampToValueAtTime(120, now + 0.18);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(1400, now);
+    filter.frequency.exponentialRampToValueAtTime(250, now + 0.18);
+
+    gain.gain.setValueAtTime(0.28, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(now);
+    osc.stop(now + 0.19);
+    this.playNoiseBurst(0.12, 900, 200, 0.18);
+  }
+
+  // 1c. Tap-to-Move Target Beacon: magical crystalline chime
+  public playTapBeacon() {
+    this.initContext();
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    const now = this.ctx.currentTime;
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(987.77, now); // B5
+    osc1.frequency.exponentialRampToValueAtTime(1174.66, now + 0.15); // D6
+
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(1479.98, now); // F#6
+    osc2.frequency.exponentialRampToValueAtTime(1975.53, now + 0.15); // B6
+
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.23);
+    osc2.stop(now + 0.23);
+  }
+
   // 2. Sword Hit: metallic clang on enemy
   public playSwordHit() {
     this.initContext();

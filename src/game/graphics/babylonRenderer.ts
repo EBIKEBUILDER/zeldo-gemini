@@ -12,7 +12,9 @@ import {
   Mesh,
   StandardMaterial,
   TransformNode,
+  Matrix,
 } from '@babylonjs/core';
+import { Vector2D } from '@/types/game';
 import { useGameStore } from '../state/gameStore';
 import {
   CAMERA_OFFSET,
@@ -430,12 +432,19 @@ export class BabylonRenderer {
     this.hero.root.position.set(player.x, 0, player.z);
     this.hero.root.rotation.y = player.facingAngle;
 
-    // Walk wobble
-    if (player.isMoving) {
+    // Walk wobble & Dodge roll animation
+    if (player.isRolling) {
+      this.hero.body.rotation.x = Math.PI * 0.35;
+      this.hero.body.rotation.z = 0;
+      this.hero.body.position.y = 0.28;
+      this.hero.head.position.y = 0.55;
+    } else if (player.isMoving) {
+      this.hero.body.rotation.x = 0;
       this.hero.body.rotation.z = Math.sin(player.walkCycle) * 0.12;
       this.hero.body.position.y = 0.42 + Math.abs(Math.sin(player.walkCycle)) * 0.06;
       this.hero.head.position.y = 0.86 + Math.abs(Math.sin(player.walkCycle)) * 0.05;
     } else {
+      this.hero.body.rotation.x = 0;
       this.hero.body.rotation.z = 0;
       this.hero.body.position.y = 0.42;
       this.hero.head.position.y = 0.86;
@@ -615,6 +624,53 @@ export class BabylonRenderer {
         mesh.position.set(p.x, 0.55, p.z);
         mesh.rotation.y += 0.12;
         mesh.rotation.x += 0.08;
+      }
+    });
+  }
+
+  // --- MOBILE TAP-TO-MOVE GROUND PICKING ---
+  public pickGroundPosition(clientX: number, clientY: number): Vector2D | null {
+    if (!this.scene || !this.camera) return null;
+    const ray = this.scene.createPickingRay(clientX, clientY, Matrix.Identity(), this.camera);
+    if (Math.abs(ray.direction.y) > 0.0001) {
+      const dist = -ray.origin.y / ray.direction.y;
+      if (dist > 0) {
+        return {
+          x: ray.origin.x + ray.direction.x * dist,
+          z: ray.origin.z + ray.direction.z * dist,
+        };
+      }
+    }
+    return null;
+  }
+
+  // --- TAP DESTINATION PULSE BEACON ---
+  public showTapBeacon(x: number, z: number) {
+    if (!this.scene) return;
+    const beacon = MeshBuilder.CreateTorus(
+      `beacon_${Date.now()}`,
+      { diameter: 0.9, thickness: 0.09, tessellation: 24 },
+      this.scene
+    );
+    beacon.position.set(x, 0.06, z);
+
+    const beaconMat = new StandardMaterial(`beacon_mat_${Date.now()}`, this.scene);
+    beaconMat.emissiveColor = new Color3(1.0, 0.85, 0.2);
+    beaconMat.diffuseColor = new Color3(1.0, 0.85, 0.2);
+    beaconMat.alpha = 0.9;
+    beacon.material = beaconMat;
+
+    let elapsed = 0;
+    const observer = this.scene.onBeforeRenderObservable.add(() => {
+      elapsed += 0.016;
+      const progress = elapsed / 0.55;
+      if (progress >= 1.0) {
+        this.scene.onBeforeRenderObservable.remove(observer);
+        beacon.dispose();
+        beaconMat.dispose();
+      } else {
+        beacon.scaling.set(1.0 + progress * 0.5, 1.0, 1.0 + progress * 0.5);
+        beaconMat.alpha = (1.0 - progress) * 0.9;
       }
     });
   }

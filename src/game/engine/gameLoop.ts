@@ -32,7 +32,7 @@ import {
 import { findPath } from './pathfinding';
 import { useGameStore } from '../state/gameStore';
 import { soundManager } from '@/audio/soundManager';
-import { ParticleState, Vector2D, ProjectileState } from '@/types/game';
+import { ParticleState, Vector2D, ProjectileState, ContextAction } from '@/types/game';
 
 class GameLoop {
   private isRunning: boolean = false;
@@ -44,12 +44,68 @@ class GameLoop {
   public keys: Record<string, boolean> = {};
   public mouseAttackRequested: boolean = false;
 
+  // Mobile & Virtual Controls
+  public joystickVector: { x: number; z: number } = { x: 0, z: 0 };
+  public touchAttackRequested: boolean = false;
+  public touchActionRequested: boolean = false;
+  public tapTarget: Vector2D | null = null;
+  public tapWaypoints: Vector2D[] = [];
+
   constructor() {
     this.handleKeyDown = this.handleKeyDown.bind(this);
     this.handleKeyUp = this.handleKeyUp.bind(this);
     this.handleMouseDown = this.handleMouseDown.bind(this);
     this.handlePointerDown = this.handlePointerDown.bind(this);
     this.tick = this.tick.bind(this);
+  }
+
+  public setJoystick(x: number, z: number) {
+    this.joystickVector = { x, z };
+    if (Math.hypot(x, z) > 0.08) {
+      this.clearTapTarget();
+    }
+  }
+
+  public requestAttack() {
+    this.touchAttackRequested = true;
+    const state = useGameStore.getState();
+    if (state.gameState === 'title' || state.gameState === 'game_over' || state.gameState === 'victory') {
+      state.startGame();
+    }
+  }
+
+  public requestAction() {
+    this.touchActionRequested = true;
+  }
+
+  public setTapTarget(targetX: number, targetZ: number) {
+    const store = useGameStore.getState();
+    if (store.gameState !== 'playing') return;
+
+    const currentMapData = store.currentMap === 'dungeon' ? store.dungeonMap : store.overworldMap;
+    const player = store.player;
+
+    const waypoints = findPath(
+      player.x,
+      player.z,
+      targetX,
+      targetZ,
+      PLAYER_RADIUS,
+      currentMapData,
+      store.quest.dungeonGateOpen,
+      store.currentMap,
+      store.breakables
+    );
+
+    this.tapTarget = { x: targetX, z: targetZ };
+    this.tapWaypoints = waypoints && waypoints.length > 0 ? waypoints : [{ x: targetX, z: targetZ }];
+    useGameStore.getState().setTapTargetPos({ x: targetX, z: targetZ });
+  }
+
+  public clearTapTarget() {
+    this.tapTarget = null;
+    this.tapWaypoints = [];
+    useGameStore.getState().setTapTargetPos(null);
   }
 
   public start() {
@@ -110,8 +166,13 @@ class GameLoop {
 
   private handlePointerDown(e: PointerEvent | MouseEvent) {
     if (e.button === 0) {
-      // Do not trigger sword swing if clicking an interactive UI button (e.g. Mute, Retry)
-      if ((e.target as HTMLElement)?.closest('button')) {
+      // Do not trigger sword swing if clicking an interactive UI button or touch control
+      if ((e.target as HTMLElement)?.closest('button, [data-interactive="true"]')) {
+        return;
+      }
+
+      // Touch interactions are handled via virtual controls and tap-to-move
+      if ((e as PointerEvent).pointerType === 'touch') {
         return;
       }
 
@@ -174,6 +235,36 @@ class GameLoop {
       if (banner.duration <= 0) banner = null;
     }
 
+    // Context Action detection for RPG HUD and mobile buttons
+    let contextAction: ContextAction = { type: 'roll', label: 'ROLL', icon: 'roll' };
+    if (store.currentMap === 'dungeon') {
+      const distToChest = Math.hypot(player.x - DUNGEON_CHEST_POS.x, player.z - DUNGEON_CHEST_POS.z);
+      const distToGate = Math.hypot(player.x - DUNGEON_GATE_POS.x, player.z - DUNGEON_GATE_POS.z);
+      const distToExit = Math.hypot(player.x - DUNGEON_EXIT_POS.x, player.z - DUNGEON_EXIT_POS.z);
+
+      if (quest.chestSpawned && !quest.chestOpened && distToChest < 2.2) {
+        contextAction = { type: 'open_chest', label: 'OPEN', icon: 'chest' };
+      } else if (!quest.dungeonGateOpen && distToGate < 2.5) {
+        contextAction = quest.hasDungeonKey
+          ? { type: 'unlock_gate', label: 'UNLOCK', icon: 'key' }
+          : { type: 'none', label: 'LOCKED', icon: 'key' };
+      } else if (distToExit < 2.2) {
+        contextAction = { type: 'exit_dungeon', label: 'EXIT', icon: 'door' };
+      }
+    } else {
+      const distToEntrance = Math.hypot(player.x - DUNGEON_ENTRANCE_POS.x, player.z - DUNGEON_ENTRANCE_POS.z);
+      if (distToEntrance < 2.5) {
+        contextAction = { type: 'enter_dungeon', label: 'ENTER', icon: 'door' };
+      }
+    }
+
+    if (
+      store.contextAction.type !== contextAction.type ||
+      store.contextAction.label !== contextAction.label
+    ) {
+      store.setContextAction(contextAction);
+    }
+
     // --- 1. PLAYER INPUT & ACCELERATION ---
     // Critical: D moves right (+X), A moves left (-X), W moves up (+Z), S moves down (-Z)
     let inputX = 0;
@@ -184,45 +275,155 @@ class GameLoop {
     if (this.keys['w'] || this.keys['arrowup']) inputZ += 1;
     if (this.keys['s'] || this.keys['arrowdown']) inputZ -= 1;
 
-    // Attack input (Space, Enter, Z, J, or mouse click)
-    const attackRequested =
-      this.keys[' '] || this.keys['z'] || this.keys['j'] || this.mouseAttackRequested;
-    this.mouseAttackRequested = false;
-
-    // Normalize diagonal input
-    if (inputX !== 0 && inputZ !== 0) {
-      const invLen = 1 / Math.SQRT2;
-      inputX *= invLen;
-      inputZ *= invLen;
+    // Joystick input
+    if (Math.abs(this.joystickVector.x) > 0.05 || Math.abs(this.joystickVector.z) > 0.05) {
+      inputX += this.joystickVector.x;
+      inputZ += this.joystickVector.z;
     }
 
-    const isMoving = inputX !== 0 || inputZ !== 0;
+    // Tap-to-move pathfinding navigation (active when no manual keys/joystick)
+    if (inputX === 0 && inputZ === 0 && this.tapWaypoints.length > 0) {
+      const nextWp = this.tapWaypoints[0];
+      const dx = nextWp.x - player.x;
+      const dz = nextWp.z - player.z;
+      const dist = Math.hypot(dx, dz);
+
+      if (dist < 0.35) {
+        this.tapWaypoints.shift();
+        if (this.tapWaypoints.length === 0) {
+          this.clearTapTarget();
+        }
+      } else {
+        inputX = dx / dist;
+        inputZ = dz / dist;
+      }
+    }
+
+    // Attack input (Space, Enter, Z, J, mouse click, or touch attack button)
+    const attackRequested =
+      this.keys[' '] || this.keys['z'] || this.keys['j'] || this.mouseAttackRequested || this.touchAttackRequested;
+    this.mouseAttackRequested = false;
+    this.touchAttackRequested = false;
+
+    // Action input (E, Shift, or touch action button)
+    const actionRequested =
+      this.keys['e'] || this.keys['shift'] || this.touchActionRequested;
+    this.touchActionRequested = false;
+
+    // Normalize diagonal / joystick magnitude to max 1.0
+    const inputMag = Math.hypot(inputX, inputZ);
+    if (inputMag > 1.0) {
+      inputX /= inputMag;
+      inputZ /= inputMag;
+    }
+
+    // Roll cooldown update
+    if (player.rollCooldown && player.rollCooldown > 0) {
+      player.rollCooldown = Math.max(0, player.rollCooldown - dt);
+    }
+
+    // Action handling (Interaction or Dodge Roll)
+    if (actionRequested) {
+      if (contextAction.type === 'open_chest' && quest.chestSpawned && !quest.chestOpened) {
+        quest.chestOpened = true;
+        soundManager.playChestOpen();
+        banner = {
+          title: 'Sunstone Recovered!',
+          message: 'You opened the Ancient Chest and claimed the legendary Sunstone!',
+          icon: 'chest',
+          duration: 4.0,
+        };
+        setTimeout(() => {
+          soundManager.playVictory();
+          const completionSeconds = Math.round((Date.now() - stats.startTime) / 1000);
+          stats.completionTime = completionSeconds;
+          useGameStore.setState({ gameState: 'victory', stats });
+        }, 1800);
+      } else if (contextAction.type === 'unlock_gate' && quest.hasDungeonKey && !quest.dungeonGateOpen) {
+        quest.dungeonGateOpen = true;
+        soundManager.playGateUnlock();
+        banner = {
+          title: 'Gate Unlocked!',
+          message: 'The heavy iron portcullis grinds open! Prepare yourself for battle.',
+          icon: 'key',
+          duration: 4.0,
+        };
+      } else if (contextAction.type === 'enter_dungeon') {
+        store.switchMap('dungeon', DUNGEON_SPAWN_POS.x, DUNGEON_SPAWN_POS.z);
+        banner = {
+          title: 'Sanctum Antechamber',
+          message: 'The air is cold and ancient. Find the key to unseal the chamber beyond.',
+          icon: 'sword',
+          duration: 4.5,
+        };
+      } else if (contextAction.type === 'exit_dungeon') {
+        store.switchMap('overworld', DUNGEON_ENTRANCE_POS.x, DUNGEON_ENTRANCE_POS.z - 2.0);
+      } else if (contextAction.type === 'roll' && (player.rollCooldown ?? 0) <= 0 && !player.isRolling) {
+        player.isRolling = true;
+        player.rollTimer = 0.26;
+        player.rollCooldown = 0.52;
+        player.iFrames = 0.32;
+        soundManager.playRoll();
+        for (let i = 0; i < 4; i++) {
+          activeParticles.push({
+            id: `poof_roll_${Date.now()}_${Math.random()}`,
+            type: 'poof',
+            x: player.x + (Math.random() - 0.5) * 0.3,
+            y: 0.15,
+            z: player.z + (Math.random() - 0.5) * 0.3,
+            vx: (Math.random() - 0.5) * 1.5,
+            vy: 0.8 + Math.random() * 0.6,
+            vz: (Math.random() - 0.5) * 1.5,
+            size: 0.18,
+            color: '#e5e7eb',
+            life: 0.3,
+            maxLife: 0.3,
+          });
+        }
+      }
+    }
+
+    // Roll duration update
+    if (player.isRolling) {
+      player.rollTimer = (player.rollTimer ?? 0.26) - dt;
+      if (player.rollTimer <= 0) {
+        player.isRolling = false;
+      } else {
+        // Roll forward surge
+        player.vx = Math.sin(player.facingAngle) * PLAYER_SPEED * 1.75;
+        player.vz = Math.cos(player.facingAngle) * PLAYER_SPEED * 1.75;
+      }
+    }
+
+    const isMoving = inputX !== 0 || inputZ !== 0 || !!player.isRolling;
     player.isMoving = isMoving;
 
-    // Smooth acceleration & friction
-    if (isMoving) {
-      const targetVx = inputX * PLAYER_SPEED;
-      const targetVz = inputZ * PLAYER_SPEED;
+    // Smooth acceleration & friction (when not rolling)
+    if (!player.isRolling) {
+      if (isMoving) {
+        const targetVx = inputX * PLAYER_SPEED;
+        const targetVz = inputZ * PLAYER_SPEED;
 
-      player.vx += (targetVx - player.vx) * Math.min(1, PLAYER_ACCEL * dt);
-      player.vz += (targetVz - player.vz) * Math.min(1, PLAYER_ACCEL * dt);
+        player.vx += (targetVx - player.vx) * Math.min(1, PLAYER_ACCEL * dt);
+        player.vz += (targetVz - player.vz) * Math.min(1, PLAYER_ACCEL * dt);
 
-      // Update 8-way facing angle (in radians: 0 = +Z, PI/2 = +X, PI = -Z, -PI/2 = -X)
-      player.facingAngle = Math.atan2(inputX, inputZ);
+        // Update 8-way facing angle (in radians: 0 = +Z, PI/2 = +X, PI = -Z, -PI/2 = -X)
+        player.facingAngle = Math.atan2(inputX, inputZ);
 
-      // Walk cycle animation
-      player.walkCycle += dt * 12.0;
-    } else {
-      // Friction / deceleration to standstill
-      const frictionStep = PLAYER_FRICTION * dt;
-      const speed = Math.sqrt(player.vx * player.vx + player.vz * player.vz);
-      if (speed > 0.001) {
-        const newSpeed = Math.max(0, speed - frictionStep);
-        player.vx = (player.vx / speed) * newSpeed;
-        player.vz = (player.vz / speed) * newSpeed;
+        // Walk cycle animation
+        player.walkCycle += dt * 12.0;
       } else {
-        player.vx = 0;
-        player.vz = 0;
+        // Friction / deceleration to standstill
+        const frictionStep = PLAYER_FRICTION * dt;
+        const speed = Math.sqrt(player.vx * player.vx + player.vz * player.vz);
+        if (speed > 0.001) {
+          const newSpeed = Math.max(0, speed - frictionStep);
+          player.vx = (player.vx / speed) * newSpeed;
+          player.vz = (player.vz / speed) * newSpeed;
+        } else {
+          player.vx = 0;
+          player.vz = 0;
+        }
       }
     }
 

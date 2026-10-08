@@ -87,7 +87,7 @@ export const VictoryScreen: React.FC = () => {
             <span>PLAY AGAIN</span>
           </button>
           <span className="text-xs text-zinc-500">
-            Press <kbd className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-300 font-mono">ENTER</kbd> or Click to embark again
+            Press <kbd className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-300 font-mono">ENTER</kbd>, Click, or Tap to embark again
           </span>
         </div>
       </div>

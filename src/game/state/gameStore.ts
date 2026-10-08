@@ -11,6 +11,8 @@ import {
   GameStats,
   BannerInfo,
   ProjectileState,
+  ContextAction,
+  Vector2D,
 } from '@/types/game';
 import {
   generateOverworld,
@@ -57,6 +59,13 @@ export interface GameStoreState {
   damageFlash: number;
   banner: BannerInfo | null;
 
+  // RPG UI & Mobile Controls
+  contextAction: ContextAction;
+  isMapModalOpen: boolean;
+  activeModalTab: 'map' | 'quest' | 'inventory' | 'stats';
+  showVirtualControls: boolean;
+  tapTargetPos: Vector2D | null;
+
   // Actions
   startGame: () => void;
   retryGame: () => void;
@@ -65,6 +74,11 @@ export interface GameStoreState {
   showBanner: (title: string, message: string, icon?: BannerInfo['icon'], duration?: number) => void;
   clearBanner: () => void;
   switchMap: (mapId: MapId, x: number, z: number) => void;
+  openMapModal: (tab?: 'map' | 'quest' | 'inventory' | 'stats') => void;
+  closeMapModal: () => void;
+  toggleVirtualControls: () => void;
+  setContextAction: (action: ContextAction) => void;
+  setTapTargetPos: (pos: Vector2D | null) => void;
   updateFromLoop: (partial: Partial<GameStoreState>) => void;
 }
 
@@ -93,6 +107,9 @@ const initialPlayer: PlayerState = {
   isAttacking: false,
   attackTimer: 0,
   attackCooldown: 0,
+  isRolling: false,
+  rollTimer: 0,
+  rollCooldown: 0,
   isBlinking: false,
   isMoving: false,
   walkCycle: 0,
@@ -140,6 +157,12 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   damageFlash: 0,
   banner: null,
 
+  contextAction: { type: 'roll', label: 'ROLL', icon: 'roll' },
+  isMapModalOpen: false,
+  activeModalTab: 'map',
+  showVirtualControls: true,
+  tapTargetPos: null,
+
   startGame: () => {
     soundManager.ensureAudio();
     soundManager.startMusic('overworld');
@@ -176,6 +199,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         icon: 'sword',
         duration: 4.5,
       },
+      isMapModalOpen: false,
+      tapTargetPos: null,
+      contextAction: { type: 'roll', label: 'ROLL', icon: 'roll' },
     });
   },
 
@@ -189,6 +215,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       gameState: 'title',
       banner: null,
       projectiles: [],
+      isMapModalOpen: false,
+      tapTargetPos: null,
     });
   },
 
@@ -221,6 +249,26 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         vz: 0,
       },
     }));
+  },
+
+  openMapModal: (tab = 'map') => {
+    set({ isMapModalOpen: true, activeModalTab: tab });
+  },
+
+  closeMapModal: () => {
+    set({ isMapModalOpen: false });
+  },
+
+  toggleVirtualControls: () => {
+    set((state) => ({ showVirtualControls: !state.showVirtualControls }));
+  },
+
+  setContextAction: (action: ContextAction) => {
+    set({ contextAction: action });
+  },
+
+  setTapTargetPos: (pos: Vector2D | null) => {
+    set({ tapTargetPos: pos });
   },
 
   updateFromLoop: (partial: Partial<GameStoreState>) => {

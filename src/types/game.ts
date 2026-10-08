@@ -39,6 +39,9 @@ export interface PlayerState {
   isAttacking: boolean;
   attackTimer: number; // remaining attack duration
   attackCooldown: number;
+  isRolling?: boolean;
+  rollTimer?: number;
+  rollCooldown?: number;
   isBlinking: boolean;
   isMoving: boolean;
   walkCycle: number;
@@ -167,11 +170,9 @@ export interface BannerInfo {
   duration: number; // seconds
 }
 
-export interface InputState {
-  up: boolean;
-  down: boolean;
-  left: boolean;
-  right: boolean;
-  attack: boolean;
-  interact: boolean;
+export interface ContextAction {
+  type: 'none' | 'attack' | 'open_chest' | 'unlock_gate' | 'enter_dungeon' | 'exit_dungeon' | 'roll' | 'take_key';
+  label: string;
+  icon: 'sword' | 'chest' | 'key' | 'door' | 'roll';
 }
+

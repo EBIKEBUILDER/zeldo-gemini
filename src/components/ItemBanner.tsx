@@ -25,16 +25,16 @@ export const ItemBanner: React.FC = () => {
   };
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-20 z-30 flex justify-center px-4 animate-in fade-in slide-in-from-top-4 duration-300">
-      <div className="flex items-center gap-4 bg-zinc-950/90 backdrop-blur-xl border border-amber-500/40 px-6 py-4 rounded-2xl shadow-[0_0_30px_rgba(245,158,11,0.25)] max-w-lg text-center">
-        <div className="shrink-0 p-2.5 bg-amber-500/10 rounded-xl border border-amber-500/20">
+    <div className="pointer-events-none fixed inset-x-0 top-16 sm:top-20 z-30 flex justify-center px-4 animate-in fade-in slide-in-from-top-4 duration-300">
+      <div className="flex items-center gap-3 sm:gap-4 bg-zinc-950/90 backdrop-blur-xl border border-amber-500/40 px-4 py-2.5 sm:px-6 sm:py-4 rounded-2xl shadow-[0_0_30px_rgba(245,158,11,0.25)] max-w-sm sm:max-w-lg text-center">
+        <div className="shrink-0 p-2 sm:p-2.5 bg-amber-500/10 rounded-xl border border-amber-500/20">
           {renderIcon()}
         </div>
         <div className="flex flex-col text-left">
-          <h3 className="text-base sm:text-lg font-black tracking-wide text-amber-200 uppercase font-serif">
+          <h3 className="text-sm sm:text-lg font-black tracking-wide text-amber-200 uppercase font-serif">
             {banner.title}
           </h3>
-          <p className="text-xs sm:text-sm text-zinc-300 font-medium">
+          <p className="text-[11px] sm:text-sm text-zinc-300 font-medium line-clamp-2">
             {banner.message}
           </p>
         </div>

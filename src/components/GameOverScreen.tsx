@@ -51,7 +51,7 @@ export const GameOverScreen: React.FC = () => {
             <span>TRY AGAIN</span>
           </button>
           <span className="text-xs text-zinc-500">
-            Press <kbd className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-300 font-mono">ENTER</kbd> or Click to retry
+            Press <kbd className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-300 font-mono">ENTER</kbd>, Click, or Tap to retry
           </span>
         </div>
       </div>

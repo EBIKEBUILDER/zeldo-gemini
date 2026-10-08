@@ -2,7 +2,8 @@
 
 import React from 'react';
 import { useGameStore } from '@/game/state/gameStore';
-import { Volume2, VolumeX, Key, Shield, Sparkles } from 'lucide-react';
+import { Volume2, VolumeX, Key, Shield, Sparkles, BookOpen, Smartphone, Target } from 'lucide-react';
+import { Minimap } from './Minimap';
 
 export const HUD: React.FC = () => {
   const player = useGameStore((state) => state.player);
@@ -12,6 +13,10 @@ export const HUD: React.FC = () => {
   const currentMap = useGameStore((state) => state.currentMap);
   const isMuted = useGameStore((state) => state.isMuted);
   const toggleMute = useGameStore((state) => state.toggleMute);
+  const openMapModal = useGameStore((state) => state.openMapModal);
+  const showVirtualControls = useGameStore((state) => state.showVirtualControls);
+  const toggleVirtualControls = useGameStore((state) => state.toggleVirtualControls);
+  const contextAction = useGameStore((state) => state.contextAction);
   const enemies = useGameStore((state) => state.enemies);
 
   // Find boss in enemies
@@ -45,7 +50,7 @@ export const HUD: React.FC = () => {
           }`}
         >
           <svg
-            className={`w-7 h-7 sm:w-8 sm:h-8 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] ${fillClass}`}
+            className={`w-6 h-6 sm:w-8 sm:h-8 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] ${fillClass}`}
             viewBox="0 0 24 24"
             stroke="currentColor"
             strokeWidth="1.5"
@@ -60,46 +65,76 @@ export const HUD: React.FC = () => {
     return hearts;
   };
 
+  // Determine current RPG Objective ribbon text
+  const getObjectiveText = () => {
+    if (currentMap === 'overworld') {
+      return 'Seek the Mountain Arch to enter the Sanctum';
+    }
+    if (!quest.hasDungeonKey && !quest.dungeonGateOpen) {
+      return 'Retrieve the Key from the Sacred Pedestal';
+    }
+    if (!quest.dungeonGateOpen) {
+      return 'Unlock the Heavy Iron Portcullis';
+    }
+    if (!quest.bossDefeated) {
+      return 'Vanquish Gorgoth the Bramble King!';
+    }
+    if (!quest.chestOpened) {
+      return 'Open the Sunstone Chest to claim victory!';
+    }
+    return 'The Sunstone is restored!';
+  };
+
   return (
-    <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-between p-4 sm:p-6 select-none font-sans">
-      {/* TOP BAR */}
-      <div className="flex items-start justify-between">
-        {/* Left: Hearts & Rupees */}
-        <div className="flex flex-col gap-2.5">
-          {/* Hearts Container */}
-          <div className="flex items-center gap-1.5 bg-black/65 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-white/10 shadow-lg">
-            {renderHearts()}
+    <div className="pointer-events-none fixed inset-0 z-20 flex flex-col justify-between p-3 sm:p-6 select-none font-sans pt-safe pb-safe pl-safe pr-safe">
+      {/* TOP ROW: RPG STATUS BARS */}
+      <div className="flex items-start justify-between gap-2 sm:gap-4">
+        {/* Left: Hearts, Rupees & RPG Objective */}
+        <div className="flex flex-col gap-2">
+          {/* Hearts Container with HP counter */}
+          <div className="flex items-center gap-2 bg-black/75 backdrop-blur-md px-3 py-1.5 sm:px-4 sm:py-2 rounded-2xl border border-amber-500/30 shadow-lg">
+            <div className="flex items-center gap-1 sm:gap-1.5">
+              {renderHearts()}
+            </div>
+            <span className="text-[10px] sm:text-xs font-mono font-bold text-zinc-300 ml-1">
+              {player.health}/{player.maxHealth} HP
+            </span>
           </div>
 
-          {/* Rupees and Quest Items */}
+          {/* Rupees and Key */}
           <div className="flex items-center gap-2">
             {/* Rupees */}
-            <div className="flex items-center gap-2 bg-black/65 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/10 shadow-lg">
-              {/* Green Rupee Icon */}
-              <div className="w-4 h-5.5 bg-gradient-to-br from-emerald-300 via-green-500 to-emerald-700 rotate-45 transform rounded-sm border border-emerald-200/80 shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
-              <span className="font-mono text-lg sm:text-xl font-black text-emerald-300 tracking-wider">
+            <div className="flex items-center gap-2 bg-black/75 backdrop-blur-md px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-xl border border-emerald-500/30 shadow-lg">
+              <div className="w-3.5 h-5 sm:w-4 sm:h-5.5 bg-gradient-to-br from-emerald-300 via-green-500 to-emerald-700 rotate-45 transform rounded-xs border border-emerald-200/80 shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
+              <span className="font-mono text-base sm:text-lg font-black text-emerald-300 tracking-wider">
                 {String(stats.rupees).padStart(3, '0')}
               </span>
             </div>
 
             {/* Dungeon Key Badge */}
             {quest.hasDungeonKey && (
-              <div className="flex items-center gap-1 bg-amber-950/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-amber-400/40 shadow-lg animate-bounce">
-                <Key className="w-5 h-5 text-amber-300" />
-                <span className="text-xs font-bold text-amber-200 uppercase tracking-wider">Key</span>
+              <div className="flex items-center gap-1.5 bg-amber-950/80 backdrop-blur-md px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl border border-amber-400/50 shadow-lg animate-bounce">
+                <Key className="w-4 h-4 text-amber-300" />
+                <span className="text-[10px] sm:text-xs font-bold text-amber-200 uppercase tracking-wider">Key</span>
               </div>
             )}
           </div>
+
+          {/* RPG Objective Ribbon */}
+          <div className="hidden sm:flex items-center gap-1.5 bg-black/70 backdrop-blur-md px-3 py-1 rounded-xl border border-amber-500/20 shadow-md text-amber-200/90 text-[11px] max-w-xs">
+            <Target className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="font-medium line-clamp-1">{getObjectiveText()}</span>
+          </div>
         </div>
 
-        {/* Center: Boss HP Bar (if active) */}
+        {/* Center: Boss HP Bar */}
         {showBossBar && boss && (
-          <div className="absolute left-1/2 -translate-x-1/2 top-4 w-72 sm:w-96 flex flex-col items-center gap-1 bg-black/80 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-red-500/40 shadow-[0_0_20px_rgba(239,68,68,0.35)] animate-fade-in">
-            <div className="flex items-center justify-between w-full text-xs font-black tracking-widest text-red-400 uppercase">
+          <div className="absolute left-1/2 -translate-x-1/2 top-3 sm:top-5 w-64 sm:w-96 flex flex-col items-center gap-1 bg-black/85 backdrop-blur-md px-3 py-2 sm:px-4 sm:py-2.5 rounded-2xl border border-red-500/50 shadow-[0_0_25px_rgba(239,68,68,0.4)] animate-fade-in z-30">
+            <div className="flex items-center justify-between w-full text-[10px] sm:text-xs font-black tracking-widest text-red-400 uppercase">
               <span>Gorgoth the Bramble King</span>
               <span>{boss.hp} / {boss.maxHp} HP</span>
             </div>
-            <div className="w-full h-3 bg-zinc-900 rounded-full overflow-hidden border border-red-950">
+            <div className="w-full h-2.5 sm:h-3 bg-zinc-950 rounded-full overflow-hidden border border-red-950">
               <div
                 className="h-full bg-gradient-to-r from-red-600 via-rose-500 to-amber-500 transition-all duration-300 rounded-full"
                 style={{ width: `${Math.max(0, (boss.hp / boss.maxHp) * 100)}%` }}
@@ -108,36 +143,88 @@ export const HUD: React.FC = () => {
           </div>
         )}
 
-        {/* Right: Area Name & Mute Toggle */}
-        <div className="flex items-center gap-3">
-          {/* Current Area Badge */}
-          <div className="bg-black/65 backdrop-blur-md px-4 py-1.5 rounded-xl border border-white/10 shadow-lg flex items-center gap-2">
-            <Shield className="w-4 h-4 text-emerald-400" />
-            <span className="text-xs sm:text-sm font-semibold tracking-wide text-zinc-200">
-              {currentAreaName}
-            </span>
+        {/* Right: Area Name, Menu Buttons & Mini-Map */}
+        <div className="flex items-start gap-2.5 sm:gap-3">
+          {/* Action & Menu Button Column */}
+          <div className="flex flex-col items-end gap-1.5 sm:gap-2">
+            {/* Current Area Badge */}
+            <div className="bg-black/75 backdrop-blur-md px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl border border-white/10 shadow-lg flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-[10px] sm:text-xs font-semibold tracking-wide text-zinc-200">
+                {currentAreaName}
+              </span>
+            </div>
+
+            {/* Quick Button Row */}
+            <div className="flex items-center gap-1.5">
+              {/* Journal / Atlas Button */}
+              <button
+                data-interactive="true"
+                onClick={() => openMapModal('quest')}
+                className="pointer-events-auto bg-black/70 hover:bg-black/90 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-amber-500/30 text-amber-300 hover:text-amber-200 transition shadow-lg cursor-pointer flex items-center gap-1 text-[11px] font-bold"
+                title="Quest Journal & Map"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Journal</span>
+              </button>
+
+              {/* Controls Toggle Button */}
+              <button
+                data-interactive="true"
+                onClick={toggleVirtualControls}
+                className={`pointer-events-auto backdrop-blur-md p-1.5 sm:p-2 rounded-xl border transition shadow-lg cursor-pointer ${
+                  showVirtualControls
+                    ? 'bg-amber-500/20 border-amber-400/50 text-amber-300'
+                    : 'bg-black/70 border-white/10 text-zinc-400'
+                }`}
+                title="Toggle On-screen Virtual Controls"
+              >
+                <Smartphone className="w-4 h-4" />
+              </button>
+
+              {/* Mute Button */}
+              <button
+                data-interactive="true"
+                onClick={toggleMute}
+                className="pointer-events-auto bg-black/70 hover:bg-black/90 backdrop-blur-md p-1.5 sm:p-2 rounded-xl border border-white/10 text-zinc-300 hover:text-white transition shadow-lg cursor-pointer"
+                title="Toggle Sound (M)"
+              >
+                {isMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+              </button>
+            </div>
           </div>
 
-          {/* Sound Mute Button */}
-          <button
-            onClick={toggleMute}
-            className="pointer-events-auto bg-black/65 hover:bg-black/85 backdrop-blur-md p-2 rounded-xl border border-white/10 text-zinc-300 hover:text-white transition shadow-lg cursor-pointer"
-            title="Toggle Sound (M)"
-          >
-            {isMuted ? <VolumeX className="w-5 h-5 text-red-400" /> : <Volume2 className="w-5 h-5 text-emerald-400" />}
-          </button>
+          {/* RPG Radar Mini-Map */}
+          <Minimap />
         </div>
       </div>
 
-      {/* BOTTOM CONTROLS HINT */}
-      <div className="flex items-center justify-between text-xs text-zinc-400/80">
-        <div className="bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-white/5 hidden sm:flex items-center gap-3">
-          <span><strong className="text-zinc-200">WASD / Arrows</strong> Move</span>
-          <span>•</span>
-          <span><strong className="text-zinc-200">Space / Click</strong> Sword</span>
-          <span>•</span>
-          <span><strong className="text-zinc-200">M</strong> Mute</span>
-        </div>
+      {/* BOTTOM ROW: CONTEXT PROMPT & DESKTOP CONTROLS */}
+      <div className="flex items-center justify-between text-xs text-zinc-400/80 pb-1">
+        {/* Contextual Action Notification (if near an interactive object) */}
+        {contextAction.type !== 'roll' && contextAction.type !== 'none' && (
+          <div className="bg-amber-950/80 backdrop-blur-md border border-amber-400/60 text-amber-200 px-3.5 py-1.5 rounded-xl shadow-lg flex items-center gap-2 animate-bounce">
+            <Sparkles className="w-4 h-4 text-amber-300" />
+            <span className="font-bold uppercase tracking-wider text-[11px]">
+              Tap Action or Press [E] to {contextAction.label}
+            </span>
+          </div>
+        )}
+
+        <div className="hidden" />
+
+        {/* Desktop Controls Info (hidden when virtual controls or on tiny screens) */}
+        {!showVirtualControls && (
+          <div className="bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-white/5 hidden md:flex items-center gap-3 text-[11px]">
+            <span><strong className="text-zinc-200">WASD / Arrows</strong> Move</span>
+            <span>•</span>
+            <span><strong className="text-zinc-200">Space / Click</strong> Sword</span>
+            <span>•</span>
+            <span><strong className="text-zinc-200">E / Shift</strong> Roll &amp; Action</span>
+            <span>•</span>
+            <span><strong className="text-zinc-200">M</strong> Audio</span>
+          </div>
+        )}
       </div>
     </div>
   );

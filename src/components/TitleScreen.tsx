@@ -52,32 +52,35 @@ export const TitleScreen: React.FC = () => {
             <span>START ADVENTURE</span>
           </button>
           <span className="text-xs text-zinc-400 font-medium">
-            Press <kbd className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-200 font-mono">ENTER</kbd> or Click to begin
+            Press <kbd className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-200 font-mono">ENTER</kbd>, Click, or Tap to begin
           </span>
         </div>
 
         {/* Controls Card */}
         <div className="w-full bg-zinc-900/70 border border-white/10 rounded-2xl p-4 sm:p-5 backdrop-blur-md flex flex-col gap-3 text-left">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
-            <Compass className="w-4 h-4" />
-            Adventurer&apos;s Field Guide
+          <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Compass className="w-4 h-4" />
+              Adventurer&apos;s Field Guide
+            </span>
+            <span className="text-[10px] text-amber-300 font-mono">Mobile &amp; Desktop</span>
           </h3>
-          <div className="grid grid-cols-2 gap-3 text-xs sm:text-sm text-zinc-300">
+          <div className="grid grid-cols-2 gap-2.5 text-xs text-zinc-300">
             <div className="flex items-center gap-2">
-              <span className="font-mono bg-zinc-800 px-2 py-1 rounded text-zinc-200 border border-zinc-700">WASD / Arrows</span>
-              <span>Move & Face</span>
+              <span className="font-mono bg-zinc-800 px-2 py-1 rounded text-zinc-200 border border-zinc-700 text-[11px]">Joystick / Tap</span>
+              <span>Move &amp; Pathfind</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-mono bg-zinc-800 px-2 py-1 rounded text-zinc-200 border border-zinc-700">Space / Click</span>
+              <span className="font-mono bg-zinc-800 px-2 py-1 rounded text-zinc-200 border border-zinc-700 text-[11px]">Attack / Space</span>
               <span>Sword Swing</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-mono bg-zinc-800 px-2 py-1 rounded text-zinc-200 border border-zinc-700">M</span>
-              <span>Toggle Audio</span>
+              <span className="font-mono bg-zinc-800 px-2 py-1 rounded text-zinc-200 border border-zinc-700 text-[11px]">Action / E</span>
+              <span>Roll &amp; Interact</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-mono bg-zinc-800 px-2 py-1 rounded text-zinc-200 border border-zinc-700">Touch Pickups</span>
-              <span>Magnet Collect</span>
+              <span className="font-mono bg-zinc-800 px-2 py-1 rounded text-zinc-200 border border-zinc-700 text-[11px]">Radar Minimap</span>
+              <span>Tap to Open Atlas</span>
             </div>
           </div>
         </div>
