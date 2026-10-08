@@ -354,6 +354,92 @@ class SoundManager {
     });
   }
 
+  // 4f. Boss Briar Eruption Channel: deep earth tremor rumble
+  public playBossRumble() {
+    this.initContext();
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    const gain = this.ctx.createGain();
+
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(18, now);
+    lfoGain.gain.setValueAtTime(30, now);
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(80, now);
+    osc.frequency.linearRampToValueAtTime(50, now + 0.85);
+
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    lfo.start(now);
+    osc.start(now);
+    lfo.stop(now + 0.9);
+    osc.stop(now + 0.9);
+
+    this.playNoiseBurst(0.75, 220, 45, 0.25);
+  }
+
+  // 4g. Ground Briar Spikes Erupt: sharp woody thrust and crack
+  public playSpikesErupt() {
+    this.initContext();
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(240, now);
+    osc.frequency.exponentialRampToValueAtTime(65, now + 0.22);
+
+    gain.gain.setValueAtTime(0.4, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(now);
+    osc.stop(now + 0.23);
+
+    this.playNoiseBurst(0.18, 1600, 150, 0.4);
+  }
+
+  // 4h. Boss Stomp / Shockwave: heavy bass slam and impact ring
+  public playBossStomp() {
+    this.initContext();
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, now);
+    osc.frequency.exponentialRampToValueAtTime(40, now + 0.35);
+
+    gain.gain.setValueAtTime(0.5, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(now);
+    osc.stop(now + 0.36);
+
+    this.playNoiseBurst(0.25, 400, 50, 0.45);
+  }
+
   // 5. Player Hurt: impactful thump
   public playPlayerHurt() {
     this.initContext();

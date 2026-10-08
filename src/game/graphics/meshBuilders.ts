@@ -172,6 +172,11 @@ export interface EnemyMeshes {
   crown?: Mesh;
   telegraphRing?: Mesh;
   defaultMat: StandardMaterial;
+  coreGem?: Mesh;
+  exclamationBubble?: TransformNode;
+  eyebrows?: Mesh[];
+  antenna?: TransformNode;
+  pauldrons?: TransformNode[];
 }
 
 export function createEnemyMesh(
@@ -180,69 +185,212 @@ export function createEnemyMesh(
 ): EnemyMeshes {
   const root = new TransformNode(`enemy_root_${Date.now()}_${Math.random()}`, scene);
 
-  const greenMat = palette.get(scene, 'slime_green', new Color3(0.2, 0.78, 0.35), new Color3(0.3, 0.3, 0.3));
-  const redMat = palette.get(scene, 'slime_red', new Color3(0.85, 0.22, 0.22), new Color3(0.3, 0.3, 0.3));
-  const bossMat = palette.get(scene, 'boss_body', new Color3(0.22, 0.12, 0.35), new Color3(0.4, 0.3, 0.5));
-  const eyeMat = palette.get(scene, 'enemy_eye_dark', new Color3(0.08, 0.08, 0.08));
-  const yellowEyeMat = palette.get(
+  // Mario RPG Palette: rich, glossy, toy-like materials
+  const greenMat = palette.get(
     scene,
-    'boss_eye_yellow',
-    new Color3(1.0, 0.85, 0.1),
-    new Color3(0.5, 0.5, 0.2),
-    new Color3(0.8, 0.6, 0.1)
+    'slime_green',
+    new Color3(0.24, 0.82, 0.38),
+    new Color3(0.55, 0.85, 0.55)
   );
-  const goldMat = palette.get(scene, 'gold_metal', new Color3(0.95, 0.78, 0.2));
+  const redMat = palette.get(
+    scene,
+    'slime_red',
+    new Color3(0.88, 0.24, 0.24),
+    new Color3(0.85, 0.55, 0.55)
+  );
+  const bossMat = palette.get(
+    scene,
+    'boss_body',
+    new Color3(0.25, 0.12, 0.38),
+    new Color3(0.5, 0.35, 0.6)
+  );
+  const eyeMat = palette.get(scene, 'enemy_eye_dark', new Color3(0.06, 0.06, 0.06));
+  const eyeWhiteMat = palette.get(scene, 'enemy_eye_white', new Color3(0.98, 0.98, 0.98), new Color3(0.8, 0.8, 0.8));
+  const eyeGlintMat = palette.get(scene, 'enemy_eye_glint', new Color3(1.0, 1.0, 1.0), new Color3(1.0, 1.0, 1.0), new Color3(1.0, 1.0, 1.0));
+  const amberEyeMat = palette.get(
+    scene,
+    'boss_eye_amber',
+    new Color3(1.0, 0.82, 0.1),
+    new Color3(0.8, 0.7, 0.3),
+    new Color3(0.9, 0.6, 0.1)
+  );
+  const woodBrowMat = palette.get(scene, 'boss_brow_wood', new Color3(0.32, 0.18, 0.1));
+  const woodPauldronMat = palette.get(scene, 'boss_pauldron_wood', new Color3(0.38, 0.22, 0.12), new Color3(0.15, 0.1, 0.05));
+  const coreGemMat = palette.get(
+    scene,
+    'boss_core_gem',
+    new Color3(0.25, 0.95, 0.45),
+    new Color3(0.8, 1.0, 0.8),
+    new Color3(0.4, 0.9, 0.3)
+  );
+  const goldMat = palette.get(scene, 'gold_metal', new Color3(0.98, 0.82, 0.22), new Color3(0.6, 0.5, 0.2));
+  const rubyMat = palette.get(
+    scene,
+    'boss_crown_ruby',
+    new Color3(0.95, 0.15, 0.25),
+    new Color3(1.0, 0.6, 0.6),
+    new Color3(0.7, 0.1, 0.15)
+  );
+  const exclamationMat = palette.get(
+    scene,
+    'exclamation_bubble_mat',
+    new Color3(1.0, 0.75, 0.1),
+    new Color3(1.0, 0.95, 0.4),
+    new Color3(1.0, 0.7, 0.1)
+  );
   const telegraphMat = palette.get(
     scene,
     'boss_telegraph_ring_mat',
-    new Color3(0.3, 0.9, 0.2),
+    new Color3(0.3, 0.95, 0.25),
     new Color3(0.6, 1.0, 0.4),
-    new Color3(0.4, 0.9, 0.3)
+    new Color3(0.4, 0.95, 0.3)
   );
 
   let body: Mesh;
   let eyes: Mesh[] = [];
   let crown: Mesh | undefined;
   let telegraphRing: Mesh | undefined;
+  let coreGem: Mesh | undefined;
+  let exclamationBubble: TransformNode | undefined;
+  let eyebrows: Mesh[] = [];
+  let antenna: TransformNode | undefined;
+  let pauldrons: TransformNode[] = [];
   let defaultMat: StandardMaterial;
 
   if (type === 'boss_gorgoth') {
     defaultMat = bossMat;
+
+    // 1. Chunky faceted body (Mario RPG Boss presence)
     body = MeshBuilder.CreateIcoSphere('boss_body', {
       radius: 1.15,
       subdivisions: 2,
       flat: true,
     }, scene);
     body.material = bossMat;
-    body.scaling.set(1.15, 0.85, 1.15);
+    body.scaling.set(1.15, 0.88, 1.15);
     body.position.y = 0.95;
     body.parent = root;
 
-    const eyeL = MeshBuilder.CreateBox('boss_eye_l', { width: 0.18, height: 0.22, depth: 0.1 }, scene);
-    eyeL.material = yellowEyeMat;
-    eyeL.position.set(-0.4, 1.1, 0.95);
+    // 2. Gnarled Wooden Shoulder Pauldrons
+    const pauldronL = new TransformNode('boss_pauldron_l', scene);
+    pauldronL.position.set(-1.15, 1.1, 0.1);
+    pauldronL.parent = root;
+    const pauldronMeshL = MeshBuilder.CreateCylinder('p_mesh_l', {
+      diameterTop: 0.55,
+      diameterBottom: 0.2,
+      height: 0.5,
+      tessellation: 5,
+    }, scene);
+    pauldronMeshL.material = woodPauldronMat;
+    pauldronMeshL.rotation.z = -0.55;
+    pauldronMeshL.parent = pauldronL;
+    pauldrons.push(pauldronL);
+
+    const pauldronR = new TransformNode('boss_pauldron_r', scene);
+    pauldronR.position.set(1.15, 1.1, 0.1);
+    pauldronR.parent = root;
+    const pauldronMeshR = MeshBuilder.CreateCylinder('p_mesh_r', {
+      diameterTop: 0.55,
+      diameterBottom: 0.2,
+      height: 0.5,
+      tessellation: 5,
+    }, scene);
+    pauldronMeshR.material = woodPauldronMat;
+    pauldronMeshR.rotation.z = 0.55;
+    pauldronMeshR.parent = pauldronR;
+    pauldrons.push(pauldronR);
+
+    // 3. Glowing Bramble Core Gem in chest
+    coreGem = MeshBuilder.CreateIcoSphere('boss_core_gem', {
+      radius: 0.26,
+      subdivisions: 1,
+      flat: true,
+    }, scene);
+    coreGem.material = coreGemMat;
+    coreGem.scaling.set(1.0, 1.3, 0.7);
+    coreGem.position.set(0, 0.85, 1.05);
+    coreGem.parent = root;
+
+    // 4. Expressive Mario RPG Eyes (Glowing amber with menacing slit pupils and wooden brow arches)
+    const eyeL = MeshBuilder.CreateBox('boss_eye_l', { width: 0.22, height: 0.24, depth: 0.12 }, scene);
+    eyeL.material = amberEyeMat;
+    eyeL.position.set(-0.38, 1.12, 0.96);
     eyeL.parent = root;
     eyes.push(eyeL);
 
-    const eyeR = MeshBuilder.CreateBox('boss_eye_r', { width: 0.18, height: 0.22, depth: 0.1 }, scene);
-    eyeR.material = yellowEyeMat;
-    eyeR.position.set(0.4, 1.1, 0.95);
+    const pupilL = MeshBuilder.CreateBox('boss_pupil_l', { width: 0.08, height: 0.2, depth: 0.05 }, scene);
+    pupilL.material = eyeMat;
+    pupilL.position.set(-0.38, 1.12, 1.03);
+    pupilL.parent = root;
+
+    const eyeR = MeshBuilder.CreateBox('boss_eye_r', { width: 0.22, height: 0.24, depth: 0.12 }, scene);
+    eyeR.material = amberEyeMat;
+    eyeR.position.set(0.38, 1.12, 0.96);
     eyeR.parent = root;
     eyes.push(eyeR);
 
+    const pupilR = MeshBuilder.CreateBox('boss_pupil_r', { width: 0.08, height: 0.2, depth: 0.05 }, scene);
+    pupilR.material = eyeMat;
+    pupilR.position.set(0.38, 1.12, 1.03);
+    pupilR.parent = root;
+
+    // Angled wooden brow arches
+    const browL = MeshBuilder.CreateBox('boss_brow_l', { width: 0.32, height: 0.09, depth: 0.14 }, scene);
+    browL.material = woodBrowMat;
+    browL.position.set(-0.38, 1.28, 0.98);
+    browL.rotation.z = -0.22;
+    browL.parent = root;
+    eyebrows.push(browL);
+
+    const browR = MeshBuilder.CreateBox('boss_brow_r', { width: 0.32, height: 0.09, depth: 0.14 }, scene);
+    browR.material = woodBrowMat;
+    browR.position.set(0.38, 1.28, 0.98);
+    browR.rotation.z = 0.22;
+    browR.parent = root;
+    eyebrows.push(browR);
+
+    // 5. Ornate Golden Briar Crown with center Ruby Gem
     crown = MeshBuilder.CreateCylinder('boss_crown', {
-      diameterTop: 0.8,
-      diameterBottom: 0.6,
-      height: 0.35,
+      diameterTop: 0.85,
+      diameterBottom: 0.65,
+      height: 0.38,
       tessellation: 6,
     }, scene);
     crown.material = goldMat;
-    crown.position.set(0, 1.85, 0);
+    crown.position.set(0, 1.88, 0);
     crown.parent = root;
 
+    const crownRuby = MeshBuilder.CreateIcoSphere('crown_ruby', { radius: 0.12, subdivisions: 1, flat: true }, scene);
+    crownRuby.material = rubyMat;
+    crownRuby.position.set(0, 1.88, 0.42);
+    crownRuby.parent = root;
+
+    // 6. Mario RPG Floating '!' Telegraph Exclamation Glyph
+    exclamationBubble = new TransformNode('boss_exclamation_bubble', scene);
+    exclamationBubble.position.set(0, 2.55, 0);
+    exclamationBubble.parent = root;
+
+    const exclamBar = MeshBuilder.CreateCylinder('exclam_bar', {
+      diameterTop: 0.22,
+      diameterBottom: 0.1,
+      height: 0.48,
+      tessellation: 8,
+    }, scene);
+    exclamBar.material = exclamationMat;
+    exclamBar.position.y = 0.18;
+    exclamBar.parent = exclamationBubble;
+
+    const exclamDot = MeshBuilder.CreateSphere('exclam_dot', { diameter: 0.14, segments: 6 }, scene);
+    exclamDot.material = exclamationMat;
+    exclamDot.position.y = -0.16;
+    exclamDot.parent = exclamationBubble;
+
+    exclamationBubble.setEnabled(false); // only enabled when telegraphing attacks
+
+    // 7. Ground Telegraph Ring
     telegraphRing = MeshBuilder.CreateTorus('boss_telegraph_ring', {
-      diameter: 3.0,
-      thickness: 0.12,
+      diameter: 3.2,
+      thickness: 0.14,
       tessellation: 28,
     }, scene);
     telegraphRing.material = telegraphMat;
@@ -250,31 +398,98 @@ export function createEnemyMesh(
     telegraphRing.parent = root;
     telegraphRing.setEnabled(false);
   } else {
+    // Slimes (Green / Red) - Mario RPG Toy Aesthetics
     defaultMat = type === 'slime_red' ? redMat : greenMat;
     body = MeshBuilder.CreateIcoSphere('slime_body', {
-      radius: 0.44,
+      radius: 0.46,
       subdivisions: 1,
       flat: true,
     }, scene);
     body.material = defaultMat;
-    body.scaling.set(1.0, 0.8, 1.0);
+    body.scaling.set(1.05, 0.82, 1.05);
     body.position.y = 0.35;
     body.parent = root;
 
-    const eyeL = MeshBuilder.CreateBox('slime_eye_l', { width: 0.07, height: 0.09, depth: 0.05 }, scene);
-    eyeL.material = eyeMat;
-    eyeL.position.set(-0.15, 0.4, 0.36);
-    eyeL.parent = root;
-    eyes.push(eyeL);
+    // Mario RPG Style Cartoon Eyes: White Cornea + Black Pupil + Specular Highlight Dot
+    // Left Eye
+    const corneaL = MeshBuilder.CreateSphere('slime_cornea_l', { diameter: 0.18, segments: 5 }, scene);
+    corneaL.material = eyeWhiteMat;
+    corneaL.scaling.set(0.7, 1.0, 0.5);
+    corneaL.position.set(-0.16, 0.42, 0.38);
+    corneaL.parent = root;
 
-    const eyeR = MeshBuilder.CreateBox('slime_eye_r', { width: 0.07, height: 0.09, depth: 0.05 }, scene);
-    eyeR.material = eyeMat;
-    eyeR.position.set(0.15, 0.4, 0.36);
-    eyeR.parent = root;
-    eyes.push(eyeR);
+    const pupilL = MeshBuilder.CreateSphere('slime_pupil_l', { diameter: 0.1, segments: 4 }, scene);
+    pupilL.material = eyeMat;
+    pupilL.scaling.set(0.65, 0.9, 0.35);
+    pupilL.position.set(-0.16, 0.42, 0.42);
+    pupilL.parent = root;
+    eyes.push(pupilL);
+
+    const glintL = MeshBuilder.CreateSphere('slime_glint_l', { diameter: 0.04, segments: 3 }, scene);
+    glintL.material = eyeGlintMat;
+    glintL.position.set(-0.14, 0.45, 0.44);
+    glintL.parent = root;
+
+    // Right Eye
+    const corneaR = MeshBuilder.CreateSphere('slime_cornea_r', { diameter: 0.18, segments: 5 }, scene);
+    corneaR.material = eyeWhiteMat;
+    corneaR.scaling.set(0.7, 1.0, 0.5);
+    corneaR.position.set(0.16, 0.42, 0.38);
+    corneaR.parent = root;
+
+    const pupilR = MeshBuilder.CreateSphere('slime_pupil_r', { diameter: 0.1, segments: 4 }, scene);
+    pupilR.material = eyeMat;
+    pupilR.scaling.set(0.65, 0.9, 0.35);
+    pupilR.position.set(0.16, 0.42, 0.42);
+    pupilR.parent = root;
+    eyes.push(pupilR);
+
+    const glintR = MeshBuilder.CreateSphere('slime_glint_r', { diameter: 0.04, segments: 3 }, scene);
+    glintR.material = eyeGlintMat;
+    glintR.position.set(0.18, 0.45, 0.44);
+    glintR.parent = root;
+
+    // Quivering Antenna / Sprout
+    antenna = new TransformNode('slime_antenna', scene);
+    antenna.position.set(0, 0.72, 0);
+    antenna.parent = root;
+
+    if (type === 'slime_red') {
+      // Fierce dual mini horns
+      const hornL = MeshBuilder.CreateCylinder('horn_l', { diameterTop: 0.02, diameterBottom: 0.1, height: 0.22, tessellation: 4 }, scene);
+      hornL.material = palette.get(scene, 'slime_horn_mat', new Color3(1.0, 0.85, 0.2));
+      hornL.position.set(-0.12, 0.08, 0);
+      hornL.rotation.z = -0.3;
+      hornL.parent = antenna;
+
+      const hornR = MeshBuilder.CreateCylinder('horn_r', { diameterTop: 0.02, diameterBottom: 0.1, height: 0.22, tessellation: 4 }, scene);
+      hornR.material = palette.get(scene, 'slime_horn_mat', new Color3(1.0, 0.85, 0.2));
+      hornR.position.set(0.12, 0.08, 0);
+      hornR.rotation.z = 0.3;
+      hornR.parent = antenna;
+    } else {
+      // Cute teardrop leaf sprout
+      const sprout = MeshBuilder.CreateSphere('sprout_bulb', { diameter: 0.14, segments: 4 }, scene);
+      sprout.material = palette.get(scene, 'sprout_mat', new Color3(0.35, 0.95, 0.45));
+      sprout.scaling.set(0.8, 1.4, 0.8);
+      sprout.position.y = 0.08;
+      sprout.parent = antenna;
+    }
   }
 
-  return { root, body, eyes, crown, telegraphRing, defaultMat };
+  return {
+    root,
+    body,
+    eyes,
+    crown,
+    telegraphRing,
+    defaultMat,
+    coreGem,
+    exclamationBubble,
+    eyebrows,
+    antenna,
+    pauldrons,
+  };
 }
 
 // 3. BREAKABLE MESH BUILDERS
@@ -513,51 +728,157 @@ export function createBrambleProjectileMesh(scene: Scene): TransformNode {
   return root;
 }
 
-// 5. WORLD PROPS (Pines, Rocks, Cottage, Well, Gate, Pedestal, Chest)
+// 4b. GROUND HAZARD & BOSS ARENA MESHES (Mario RPG Encounter Polish)
+export function createGroundRuneMesh(scene: Scene): TransformNode {
+  const root = new TransformNode(`ground_rune_${Date.now()}_${Math.random()}`, scene);
+  const runeMat = palette.get(
+    scene,
+    'briar_ground_rune',
+    new Color3(0.9, 0.18, 0.35),
+    new Color3(1.0, 0.5, 0.6),
+    new Color3(0.85, 0.15, 0.3)
+  );
+
+  // Outer warning ring
+  const ring = MeshBuilder.CreateTorus('rune_ring', {
+    diameter: 1.8,
+    thickness: 0.08,
+    tessellation: 28,
+  }, scene);
+  ring.material = runeMat;
+  ring.position.y = 0.04;
+  ring.parent = root;
+
+  // Cross briar lines
+  const bar1 = MeshBuilder.CreateBox('rune_bar1', { width: 1.5, height: 0.02, depth: 0.07 }, scene);
+  bar1.material = runeMat;
+  bar1.position.y = 0.04;
+  bar1.parent = root;
+
+  const bar2 = MeshBuilder.CreateBox('rune_bar2', { width: 0.07, height: 0.02, depth: 1.5 }, scene);
+  bar2.material = runeMat;
+  bar2.position.y = 0.04;
+  bar2.parent = root;
+
+  return root;
+}
+
+export function createBriarSpikesMesh(scene: Scene): TransformNode {
+  const root = new TransformNode(`briar_spikes_${Date.now()}_${Math.random()}`, scene);
+  const woodMat = palette.get(
+    scene,
+    'briar_spike_wood',
+    new Color3(0.38, 0.22, 0.12),
+    new Color3(0.2, 0.15, 0.1)
+  );
+  const tipMat = palette.get(
+    scene,
+    'briar_spike_tip',
+    new Color3(0.92, 0.18, 0.28),
+    new Color3(1.0, 0.5, 0.5),
+    new Color3(0.65, 0.1, 0.15)
+  );
+
+  const spikeConfigs = [
+    { x: -0.22, z: -0.22, h: 1.35, rx: -0.15, rz: 0.15 },
+    { x: 0.24, z: -0.18, h: 1.55, rx: -0.12, rz: -0.18 },
+    { x: -0.16, z: 0.26, h: 1.45, rx: 0.18, rz: 0.12 },
+    { x: 0.2, z: 0.22, h: 1.65, rx: 0.14, rz: -0.14 },
+  ];
+
+  spikeConfigs.forEach((cfg, idx) => {
+    const spike = MeshBuilder.CreateCylinder(`b_spike_${idx}`, {
+      diameterTop: 0.02,
+      diameterBottom: 0.24,
+      height: cfg.h,
+      tessellation: 5,
+    }, scene);
+    spike.material = idx === 3 ? tipMat : woodMat;
+    spike.position.set(cfg.x, cfg.h * 0.5, cfg.z);
+    spike.rotation.x = cfg.rx;
+    spike.rotation.z = cfg.rz;
+    spike.parent = root;
+  });
+
+  return root;
+}
+
+export function createBossArenaRuneMesh(scene: Scene): TransformNode {
+  const root = new TransformNode('boss_arena_rune_root', scene);
+  const runeMat = palette.get(
+    scene,
+    'boss_arena_rune_mat',
+    new Color3(0.45, 0.25, 0.65),
+    new Color3(0.6, 0.4, 0.8),
+    new Color3(0.25, 0.12, 0.35)
+  );
+
+  const mainRing = MeshBuilder.CreateTorus('arena_ring', {
+    diameter: 10.5,
+    thickness: 0.12,
+    tessellation: 36,
+  }, scene);
+  mainRing.material = runeMat;
+  mainRing.position.y = 0.03;
+  mainRing.parent = root;
+
+  const innerRing = MeshBuilder.CreateTorus('arena_inner_ring', {
+    diameter: 6.2,
+    thickness: 0.08,
+    tessellation: 32,
+  }, scene);
+  innerRing.material = runeMat;
+  innerRing.position.y = 0.03;
+  innerRing.parent = root;
+
+  return root;
+}
+
+// 5. WORLD PROPS (Mario RPG Puffy Trees, Rocks, Cottage, Well, Gate, Pedestal, Chest)
 export function createFacetedTree(scene: Scene): TransformNode {
   const root = new TransformNode('tree_root', scene);
-  const trunkMat = palette.get(scene, 'tree_trunk', new Color3(0.42, 0.26, 0.15));
-  const foliageMat = palette.get(scene, 'tree_foliage', new Color3(0.15, 0.48, 0.22));
+  const trunkMat = palette.get(scene, 'tree_trunk', new Color3(0.44, 0.28, 0.16));
+  const foliageMat1 = palette.get(scene, 'tree_foliage_1', new Color3(0.18, 0.58, 0.25), new Color3(0.2, 0.4, 0.2));
+  const foliageMat2 = palette.get(scene, 'tree_foliage_2', new Color3(0.24, 0.68, 0.3), new Color3(0.25, 0.45, 0.25));
 
+  // Sturdy Mario RPG style cylindrical trunk
   const trunk = MeshBuilder.CreateCylinder('trunk', {
-    diameterTop: 0.35,
-    diameterBottom: 0.5,
-    height: 1.0,
-    tessellation: 6,
+    diameterTop: 0.42,
+    diameterBottom: 0.58,
+    height: 1.1,
+    tessellation: 8,
   }, scene);
   trunk.material = trunkMat;
-  trunk.position.y = 0.5;
+  trunk.position.y = 0.55;
   trunk.parent = root;
 
-  const cone1 = MeshBuilder.CreateCylinder('cone1', {
-    diameterTop: 0.1,
-    diameterBottom: 1.8,
-    height: 1.2,
-    tessellation: 7,
+  // Mario RPG Puffy Cloud-Dome Foliage (3 stacked rounded puffy crowns with rich green gradient)
+  const dome1 = MeshBuilder.CreateSphere('foliage_dome1', {
+    diameter: 1.85,
+    segments: 5,
   }, scene);
-  cone1.material = foliageMat;
-  cone1.position.y = 1.3;
-  cone1.parent = root;
+  dome1.material = foliageMat1;
+  dome1.scaling.set(1.1, 0.85, 1.1);
+  dome1.position.set(0, 1.45, 0);
+  dome1.parent = root;
 
-  const cone2 = MeshBuilder.CreateCylinder('cone2', {
-    diameterTop: 0.05,
-    diameterBottom: 1.4,
-    height: 1.0,
-    tessellation: 7,
+  const dome2 = MeshBuilder.CreateSphere('foliage_dome2', {
+    diameter: 1.45,
+    segments: 5,
   }, scene);
-  cone2.material = foliageMat;
-  cone2.position.y = 2.0;
-  cone2.parent = root;
+  dome2.material = foliageMat2;
+  dome2.scaling.set(1.05, 0.9, 1.05);
+  dome2.position.set(0.08, 2.15, -0.05);
+  dome2.parent = root;
 
-  const cone3 = MeshBuilder.CreateCylinder('cone3', {
-    diameterTop: 0.01,
-    diameterBottom: 0.9,
-    height: 0.85,
-    tessellation: 6,
+  const dome3 = MeshBuilder.CreateSphere('foliage_dome3', {
+    diameter: 0.95,
+    segments: 4,
   }, scene);
-  cone3.material = foliageMat;
-  cone3.position.y = 2.6;
-  cone3.parent = root;
+  dome3.material = foliageMat2;
+  dome3.scaling.set(1.0, 0.95, 1.0);
+  dome3.position.set(-0.06, 2.7, 0.04);
+  dome3.parent = root;
 
   return root;
 }
@@ -603,17 +924,35 @@ export function createCottageMesh(scene: Scene): TransformNode {
   return root;
 }
 
-export function createStonePillar(scene: Scene): Mesh {
-  const stoneMat = palette.get(scene, 'pillar_stone', new Color3(0.55, 0.58, 0.62));
-  const pillar = MeshBuilder.CreateCylinder('pillar', {
-    diameterTop: 0.7,
-    diameterBottom: 0.8,
-    height: 2.4,
+export function createStonePillar(scene: Scene): TransformNode {
+  const root = new TransformNode(`pillar_root_${Date.now()}_${Math.random()}`, scene);
+  const stoneMat = palette.get(scene, 'pillar_stone', new Color3(0.55, 0.58, 0.62), new Color3(0.2, 0.2, 0.2));
+  const trimMat = palette.get(scene, 'pillar_trim', new Color3(0.42, 0.45, 0.49), new Color3(0.3, 0.3, 0.3));
+
+  // Stepped base
+  const base = MeshBuilder.CreateBox('pillar_base', { width: 1.15, height: 0.3, depth: 1.15 }, scene);
+  base.material = trimMat;
+  base.position.y = 0.15;
+  base.parent = root;
+
+  // Main fluted shaft
+  const shaft = MeshBuilder.CreateCylinder('pillar_shaft', {
+    diameterTop: 0.72,
+    diameterBottom: 0.78,
+    height: 2.1,
     tessellation: 8,
   }, scene);
-  pillar.material = stoneMat;
-  pillar.position.y = 1.2;
-  return pillar;
+  shaft.material = stoneMat;
+  shaft.position.y = 1.35;
+  shaft.parent = root;
+
+  // Carved capital on top
+  const capital = MeshBuilder.CreateBox('pillar_capital', { width: 1.1, height: 0.25, depth: 1.1 }, scene);
+  capital.material = trimMat;
+  capital.position.y = 2.45;
+  capital.parent = root;
+
+  return root;
 }
 
 export function createWallTorch(scene: Scene): TransformNode {

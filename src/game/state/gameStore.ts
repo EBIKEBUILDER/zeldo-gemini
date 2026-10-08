@@ -11,6 +11,7 @@ import {
   GameStats,
   BannerInfo,
   ProjectileState,
+  GroundHazardState,
   ContextAction,
   Vector2D,
 } from '@/types/game';
@@ -47,6 +48,7 @@ export interface GameStoreState {
   breakables: BreakableState[];
   pickups: PickupState[];
   projectiles: ProjectileState[];
+  groundHazards: GroundHazardState[];
   activeParticles: ParticleState[];
 
   // Quest & Progression
@@ -147,6 +149,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   breakables: [...initialOverworld.initialBreakables, ...initialDungeon.initialBreakables],
   pickups: [...initialOverworld.initialPickups, ...initialDungeon.initialPickups],
   projectiles: [],
+  groundHazards: [],
   activeParticles: [],
 
   quest: { ...initialQuest },
@@ -185,6 +188,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       breakables: [...overworld.initialBreakables, ...dungeon.initialBreakables],
       pickups: [...overworld.initialPickups, ...dungeon.initialPickups],
       projectiles: [],
+      groundHazards: [],
       activeParticles: [],
       quest: { ...initialQuest },
       stats: {
@@ -215,6 +219,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       gameState: 'title',
       banner: null,
       projectiles: [],
+      groundHazards: [],
       isMapModalOpen: false,
       tapTargetPos: null,
     });
@@ -241,6 +246,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       currentMap: mapId,
       currentAreaName: computeAreaName(mapId, x, z),
       projectiles: [],
+      groundHazards: [],
       player: {
         ...state.player,
         x,

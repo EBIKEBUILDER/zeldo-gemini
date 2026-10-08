@@ -71,10 +71,17 @@ class FastMinHeap {
 }
 
 /**
- * Intelligent A* grid pathfinding with raycast path-smoothing (string-pulling).
- * Computes an optimal obstacle-avoidance route around trees, rocks, pillars, water, and walls.
+ * Intelligent A* (A-Star) Grid Pathfinding with Raycast Line-of-Sight Path Smoothing (String-Pulling).
+ *
+ * Algorithm Breakdown:
+ * 1. Line-of-Sight Fast Path: If direct raycast to target is unobstructed, returns single straight-line target.
+ * 2. Spatial Discretisation: Maps continuous 3D world coordinates onto an optimal 0.5-unit spatial grid.
+ * 3. Min-Heap Priority Queue: Uses FastMinHeap for O(log N) open-set exploration ordered by f(n) = g(n) + h(n).
+ * 4. 8-Way Graph Traversal: Evaluates 4 orthogonal (cost 1.0) and 4 diagonal (cost 1.414) directions.
+ * 5. Corner-Cutting Prevention: Strictly verifies both adjacent orthogonal cells before allowing diagonal movement.
+ * 6. Line-of-Sight String-Pulling Smoothing: Raycasts along raw path to prune redundant zig-zag waypoints.
  */
-export function findPath(
+export function findPathAStar(
   startX: number,
   startZ: number,
   targetX: number,
@@ -286,3 +293,6 @@ export function findPath(
 
   return smoothed;
 }
+
+// Backward compatibility alias
+export const findPath = findPathAStar;

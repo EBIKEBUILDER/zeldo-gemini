@@ -93,8 +93,13 @@ export const ENEMY_SETTINGS = {
     projectileSpeed: 6.0, // Units per second for bramble thorn
     projectileDamage: 1, // 1/2 heart damage (fair & dodgeable for first boss)
     projectileRadius: 0.28,
-    projectileCooldown: 3.8,
-    projectileWindup: 0.4,
+    projectileCooldown: 3.4,
+    projectileWindup: 0.45,
+    groundEruptionWindup: 0.9, // Seconds of telegraphed floor rune before briar spikes erupt
+    groundEruptionDamage: 1,
+    groundEruptionRadius: 0.9,
+    sporeStompCooldown: 4.5,
+    sporeStompRadius: 2.6,
   },
 };
 

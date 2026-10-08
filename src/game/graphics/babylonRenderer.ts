@@ -21,6 +21,7 @@ import {
   CAMERA_LERP_SPEED,
   DUNGEON_GATE_POS,
   DUNGEON_CHEST_POS,
+  DUNGEON_BOSS_SPAWN_POS,
 } from '../constants';
 import {
   createHeroMesh,
@@ -33,6 +34,9 @@ import {
   createHeartMesh,
   createKeyMesh,
   createBrambleProjectileMesh,
+  createGroundRuneMesh,
+  createBriarSpikesMesh,
+  createBossArenaRuneMesh,
   createFacetedTree,
   createRockMesh,
   createCottageMesh,
@@ -67,6 +71,7 @@ export class BabylonRenderer {
   private breakableMeshes: Map<string, TransformNode> = new Map();
   private pickupMeshes: Map<string, TransformNode> = new Map();
   private projectileMeshes: Map<string, TransformNode> = new Map();
+  private hazardMeshes: Map<string, { rune: TransformNode; spikes: TransformNode }> = new Map();
   private particleMeshes: Map<string, Mesh> = new Map();
 
   // Props
@@ -388,6 +393,11 @@ export class BabylonRenderer {
     this.gateMesh = createDungeonGate(this.scene);
     this.gateMesh.position.set(DUNGEON_GATE_POS.x, 0, DUNGEON_GATE_POS.z);
     this.gateMesh.parent = this.dungeonRoot;
+
+    // Boss Sanctum Grand Runic Arena Floor Circle (Mario RPG Stage Presence)
+    const arenaRune = createBossArenaRuneMesh(this.scene);
+    arenaRune.position.set(DUNGEON_BOSS_SPAWN_POS.x, 0, DUNGEON_BOSS_SPAWN_POS.z);
+    arenaRune.parent = this.dungeonRoot;
   }
 
   // --- VIEW LAYER SYNC: READ STATE EACH FRAME ---
@@ -467,7 +477,8 @@ export class BabylonRenderer {
     // Invulnerability Blink
     this.hero.root.setEnabled(!player.isBlinking);
 
-    // 4. Update Enemy Meshes
+    // 4. Update Enemy Meshes (Mario RPG Character Styling)
+    const nowTime = performance.now();
     store.enemies.forEach((enemy) => {
       let meshes = this.enemyMeshes.get(enemy.id);
 
@@ -483,22 +494,71 @@ export class BabylonRenderer {
         meshes.root.position.set(enemy.x, 0, enemy.z);
         meshes.root.rotation.y = enemy.facingAngle;
 
-        // Hop animation
-        const baseHeight = enemy.type === 'boss_gorgoth' ? 0.95 : 0.35;
-        const hopHeight = Math.abs(Math.sin(enemy.hopCycle)) * (enemy.type === 'boss_gorgoth' ? 0.4 : 0.25);
+        // Base hop height
+        const isBoss = enemy.type === 'boss_gorgoth';
+        const baseHeight = isBoss ? 0.95 : 0.35;
+        const hopSin = Math.sin(enemy.hopCycle);
+        const hopHeight = Math.abs(hopSin) * (isBoss ? 0.38 : 0.26);
         meshes.body.position.y = baseHeight + hopHeight;
 
         // Hit flash
         meshes.body.material = enemy.hitFlashTimer > 0 ? this.whiteFlashMat : meshes.defaultMat;
 
-        // Boss telegraphed ranged attack ring
-        if (meshes.telegraphRing) {
-          const isTelegraphing = !!(enemy.castTimer && enemy.castTimer > 0);
-          meshes.telegraphRing.setEnabled(isTelegraphing);
+        if (isBoss) {
+          // Boss Telegraphed Attack Animations
+          const isTelegraphing =
+            !!(enemy.castTimer && enemy.castTimer > 0) ||
+            !!(enemy.bossTelegraphTimer && enemy.bossTelegraphTimer > 0);
+
+          // 1. Mario RPG Floating '!' Telegraph Exclamation Bubble
+          if (meshes.exclamationBubble) {
+            meshes.exclamationBubble.setEnabled(isTelegraphing);
+            if (isTelegraphing) {
+              const exclamBounce = 2.55 + Math.sin(nowTime * 0.018) * 0.14;
+              meshes.exclamationBubble.position.y = exclamBounce;
+              meshes.exclamationBubble.rotation.y += 0.06;
+            }
+          }
+
+          // 2. Glowing Bramble Core Gem: rapid pulse when charging
+          if (meshes.coreGem) {
+            const gemPulse = isTelegraphing
+              ? 1.0 + Math.sin(nowTime * 0.04) * 0.38
+              : 1.0 + Math.sin(nowTime * 0.005) * 0.12;
+            meshes.coreGem.scaling.set(gemPulse, gemPulse * 1.3, gemPulse * 0.7);
+          }
+
+          // 3. Ground Telegraph Ring
+          if (meshes.telegraphRing) {
+            meshes.telegraphRing.setEnabled(isTelegraphing);
+            if (isTelegraphing) {
+              const pulse = 1.0 + Math.sin(nowTime * 0.025) * 0.18;
+              meshes.telegraphRing.scaling.set(pulse, 1.0, pulse);
+              meshes.telegraphRing.rotation.y += 0.08;
+            }
+          }
+
+          // 4. Boss Body Squash-and-Stretch Anticipation
           if (isTelegraphing) {
-            const pulse = 1.0 + Math.sin(performance.now() * 0.025) * 0.18;
-            meshes.telegraphRing.scaling.set(pulse, 1.0, pulse);
-            meshes.telegraphRing.rotation.y += 0.08;
+            // Squashes down into the floor while charging up
+            meshes.body.scaling.set(1.28, 0.72, 1.28);
+          } else {
+            // Dynamic hop cycle deformation
+            meshes.body.scaling.set(
+              1.15 - hopSin * 0.1,
+              0.88 + hopSin * 0.2,
+              1.15 - hopSin * 0.1
+            );
+          }
+        } else {
+          // Slime Bouncy Squash & Stretch + Antenna Wobble
+          meshes.body.scaling.set(
+            1.05 - hopSin * 0.16,
+            0.82 + hopSin * 0.28,
+            1.05 - hopSin * 0.16
+          );
+          if (meshes.antenna) {
+            meshes.antenna.rotation.z = Math.sin(enemy.hopCycle * 0.8) * 0.22;
           }
         }
       }
@@ -626,6 +686,46 @@ export class BabylonRenderer {
         mesh.rotation.x += 0.08;
       }
     });
+
+    // 12. Update Ground Hazards (Telegraphed Briar Eruptions)
+    const activeHazardIds = new Set((store.groundHazards || []).map((h) => h.id));
+
+    this.hazardMeshes.forEach((nodes, id) => {
+      if (!activeHazardIds.has(id)) {
+        nodes.rune.dispose();
+        nodes.spikes.dispose();
+        this.hazardMeshes.delete(id);
+      }
+    });
+
+    (store.groundHazards || []).forEach((h) => {
+      let nodes = this.hazardMeshes.get(h.id);
+      if (!nodes) {
+        const rune = createGroundRuneMesh(this.scene);
+        const spikes = createBriarSpikesMesh(this.scene);
+        nodes = { rune, spikes };
+        this.hazardMeshes.set(h.id, nodes);
+      }
+
+      const isVisible = h.mapId === store.currentMap;
+      nodes.rune.setEnabled(isVisible && !h.erupted);
+      nodes.spikes.setEnabled(isVisible && h.erupted);
+
+      if (isVisible) {
+        if (!h.erupted) {
+          nodes.rune.position.set(h.x, 0.04, h.z);
+          const progress = 1.0 - Math.max(0, h.timer / (h.maxTimer || 0.9));
+          const runeScale = 0.9 + Math.sin(progress * Math.PI * 4) * 0.12;
+          nodes.rune.scaling.set(runeScale, 1.0, runeScale);
+          nodes.rune.rotation.y += 0.04;
+        } else {
+          nodes.spikes.position.set(h.x, 0, h.z);
+          const lifeProgress = 1.0 - Math.max(0, h.duration / 0.85);
+          const spikeY = lifeProgress < 0.2 ? lifeProgress * 5.0 : Math.max(0, 1.0 - (lifeProgress - 0.2) * 1.25);
+          nodes.spikes.scaling.set(1.0, spikeY, 1.0);
+        }
+      }
+    });
   }
 
   // --- MOBILE TAP-TO-MOVE GROUND PICKING ---
@@ -681,6 +781,11 @@ export class BabylonRenderer {
     palette.clear();
     this.projectileMeshes.forEach((m) => m.dispose());
     this.projectileMeshes.clear();
+    this.hazardMeshes.forEach((nodes) => {
+      nodes.rune.dispose();
+      nodes.spikes.dispose();
+    });
+    this.hazardMeshes.clear();
     this.scene.dispose();
     this.engine.dispose();
   }

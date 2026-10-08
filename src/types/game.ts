@@ -83,7 +83,27 @@ export interface EnemyState {
   stuckSampleTimer?: number;
   lastSamplePos?: Vector2D;
   pathWaypoints?: Vector2D[];
+  aStarPath?: Vector2D[];
   pathUpdateTimer?: number;
+  bossAction?: 'none' | 'telegraphing_ricochet' | 'telegraphing_eruption' | 'spore_burst';
+  bossAttackType?: 'ricochet_volley' | 'ground_eruption' | 'spore_burst';
+  bossTelegraphTimer?: number;
+  bossTelegraphMax?: number;
+  bossTelegraphTarget?: Vector2D;
+}
+
+export interface GroundHazardState {
+  id: string;
+  type: 'briar_eruption';
+  x: number;
+  z: number;
+  radius: number;
+  timer: number;
+  maxTimer: number;
+  duration: number;
+  erupted: boolean;
+  damage: number;
+  mapId: MapId;
 }
 
 export interface ProjectileState {

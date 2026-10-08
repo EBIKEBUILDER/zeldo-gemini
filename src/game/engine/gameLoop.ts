@@ -29,10 +29,10 @@ import {
   hasLineOfSight,
   resolveSmartSteering,
 } from './physics';
-import { findPath } from './pathfinding';
+import { findPathAStar, findPath } from './pathfinding';
 import { useGameStore } from '../state/gameStore';
 import { soundManager } from '@/audio/soundManager';
-import { ParticleState, Vector2D, ProjectileState, ContextAction } from '@/types/game';
+import { ParticleState, Vector2D, ProjectileState, GroundHazardState, ContextAction } from '@/types/game';
 
 class GameLoop {
   private isRunning: boolean = false;
@@ -222,6 +222,7 @@ class GameLoop {
     const breakables = store.breakables.map((b) => ({ ...b }));
     const pickups = store.pickups.map((p) => ({ ...p }));
     const projectiles = (store.projectiles || []).map((p) => ({ ...p }));
+    let groundHazards = (store.groundHazards || []).map((h) => ({ ...h }));
     let activeParticles = [...store.activeParticles];
     const quest = { ...store.quest };
     const stats = { ...store.stats };
@@ -912,7 +913,7 @@ class GameLoop {
 
             if (!hasLoSToSpawn) {
               if (!enemy.pathWaypoints || enemy.pathWaypoints.length === 0 || (enemy.pathUpdateTimer && enemy.pathUpdateTimer <= 0)) {
-                enemy.pathWaypoints = findPath(
+                const path = findPathAStar(
                   enemy.x,
                   enemy.z,
                   enemy.spawnX,
@@ -922,7 +923,9 @@ class GameLoop {
                   quest.dungeonGateOpen,
                   store.currentMap,
                   breakables
-                ) || undefined;
+                );
+                enemy.pathWaypoints = path || undefined;
+                enemy.aStarPath = path || undefined;
                 enemy.pathUpdateTimer = 0.5;
               }
               if (enemy.pathUpdateTimer !== undefined) enemy.pathUpdateTimer -= dt;
@@ -1021,7 +1024,7 @@ class GameLoop {
 
         if (!hasClearLoS) {
           if (!enemy.pathWaypoints || enemy.pathWaypoints.length === 0 || (enemy.pathUpdateTimer && enemy.pathUpdateTimer <= 0)) {
-            enemy.pathWaypoints = findPath(
+            const path = findPathAStar(
               enemy.x,
               enemy.z,
               player.x,
@@ -1031,11 +1034,14 @@ class GameLoop {
               quest.dungeonGateOpen,
               store.currentMap,
               breakables
-            ) || undefined;
+            );
+            enemy.pathWaypoints = path || undefined;
+            enemy.aStarPath = path || undefined;
             enemy.pathUpdateTimer = 0.4;
           }
         } else {
           enemy.pathWaypoints = undefined;
+          enemy.aStarPath = undefined;
         }
 
         // Sample movement progress to detect if completely stuck without movement towards player
@@ -1146,7 +1152,7 @@ class GameLoop {
           enemy.steeringBias = steer.chosenBias;
         }
 
-        // 2. Boss Ranged Bramble Attack
+        // 2. Boss Dynamic Multi-Phase Ranged & Area Attacks (Mario RPG Style Encounter)
         if (isBoss && !quest.bossDefeated) {
           if (enemy.rangedCooldown === undefined) {
             enemy.rangedCooldown = 2.0; // initial grace period upon entering boss room
@@ -1154,28 +1160,69 @@ class GameLoop {
 
           if (enemy.castTimer && enemy.castTimer > 0) {
             enemy.castTimer -= dt;
+            enemy.bossTelegraphTimer = enemy.castTimer;
+
             if (enemy.castTimer <= 0) {
-              // Launch ricocheting bramble thorn projectile towards player
-              const pDist = Math.sqrt(dx * dx + dz * dz) || 0.001;
-              const pSpeed = ENEMY_SETTINGS.boss_gorgoth.projectileSpeed;
-              projectiles.push({
-                id: `proj_boss_${Date.now()}_${Math.random()}`,
-                x: enemy.x + (dx / pDist) * 1.1,
-                z: enemy.z + (dz / pDist) * 1.1,
-                vx: (dx / pDist) * pSpeed,
-                vz: (dz / pDist) * pSpeed,
-                radius: ENEMY_SETTINGS.boss_gorgoth.projectileRadius,
-                damage: ENEMY_SETTINGS.boss_gorgoth.projectileDamage,
-                life: 4.0,
-                maxLife: 4.0,
-                source: 'boss',
-                color: '#7bc637',
-                mapId: 'dungeon',
-                bounces: 2,
-                maxBounces: 2,
-              });
-              soundManager.playBossShoot();
-              enemy.rangedCooldown = ENEMY_SETTINGS.boss_gorgoth.projectileCooldown + (Math.random() * 0.8 - 0.4);
+              enemy.bossAction = 'none';
+              enemy.bossTelegraphTimer = 0;
+
+              if (enemy.bossAttackType === 'ground_eruption') {
+                // Briar Root Eruption is already armed and ticking in groundHazards
+                soundManager.playBossRoar();
+                enemy.rangedCooldown = ENEMY_SETTINGS.boss_gorgoth.projectileCooldown + (Math.random() * 0.6 - 0.3);
+              } else {
+                // Launch ricocheting bramble thorn projectile(s) towards player
+                const pDist = Math.sqrt(dx * dx + dz * dz) || 0.001;
+                const pSpeed = ENEMY_SETTINGS.boss_gorgoth.projectileSpeed;
+                const dirX = dx / pDist;
+                const dirZ = dz / pDist;
+
+                projectiles.push({
+                  id: `proj_boss_${Date.now()}_${Math.random()}`,
+                  x: enemy.x + dirX * 1.15,
+                  z: enemy.z + dirZ * 1.15,
+                  vx: dirX * pSpeed,
+                  vz: dirZ * pSpeed,
+                  radius: ENEMY_SETTINGS.boss_gorgoth.projectileRadius,
+                  damage: ENEMY_SETTINGS.boss_gorgoth.projectileDamage,
+                  life: 4.0,
+                  maxLife: 4.0,
+                  source: 'boss',
+                  color: '#7bc637',
+                  mapId: 'dungeon',
+                  bounces: 2,
+                  maxBounces: 2,
+                });
+
+                // Phase 2 (<= 5 HP): Gorgoth shoots a dual-thorn spread!
+                if (enemy.hp <= 5) {
+                  const angleOffset = 0.26; // ~15 degrees
+                  const cosA = Math.cos(angleOffset);
+                  const sinA = Math.sin(angleOffset);
+                  const altX = dirX * cosA - dirZ * sinA;
+                  const altZ = dirX * sinA + dirZ * cosA;
+
+                  projectiles.push({
+                    id: `proj_boss_p2_${Date.now()}_${Math.random()}`,
+                    x: enemy.x + altX * 1.15,
+                    z: enemy.z + altZ * 1.15,
+                    vx: altX * pSpeed,
+                    vz: altZ * pSpeed,
+                    radius: ENEMY_SETTINGS.boss_gorgoth.projectileRadius,
+                    damage: ENEMY_SETTINGS.boss_gorgoth.projectileDamage,
+                    life: 4.0,
+                    maxLife: 4.0,
+                    source: 'boss',
+                    color: '#7bc637',
+                    mapId: 'dungeon',
+                    bounces: 2,
+                    maxBounces: 2,
+                  });
+                }
+
+                soundManager.playBossShoot();
+                enemy.rangedCooldown = ENEMY_SETTINGS.boss_gorgoth.projectileCooldown + (Math.random() * 0.8 - 0.4);
+              }
             }
           } else if (enemy.rangedCooldown <= 0) {
             const hasClearLoS = hasLineOfSight(
@@ -1200,10 +1247,42 @@ class GameLoop {
             const isPlayerDistant = distToPlayer > 3.0;
             const isBossStuck = (enemy.stuckTimer || 0) > 0.5;
 
-            // Trigger ranged attack if player is in corner, behind pillar, keeping distance, or periodically
+            // Trigger dynamic ranged attack:
             if (isPlayerInCorner || !hasClearLoS || isPlayerDistant || isBossStuck || distToPlayer > 2.2) {
-              enemy.castTimer = ENEMY_SETTINGS.boss_gorgoth.projectileWindup;
-              soundManager.playBossCharge();
+              // Decide between Briar Root Eruption (Anti-Corner / Flush) or Ricochet Volley:
+              // If player is in corner or unreachable without line-of-sight, 65% chance to cast Briar Root Eruption
+              const rollEruption = (isPlayerInCorner || !hasClearLoS || isBossStuck) && Math.random() < 0.65;
+
+              if (rollEruption) {
+                // Ability 2: Telegraphed Briar Root Eruption under player's feet
+                enemy.bossAction = 'telegraphing_eruption';
+                enemy.bossAttackType = 'ground_eruption';
+                enemy.castTimer = ENEMY_SETTINGS.boss_gorgoth.groundEruptionWindup;
+                enemy.bossTelegraphTimer = ENEMY_SETTINGS.boss_gorgoth.groundEruptionWindup;
+                enemy.bossTelegraphTarget = { x: player.x, z: player.z };
+                soundManager.playBossRumble();
+
+                groundHazards.push({
+                  id: `hazard_eruption_${Date.now()}_${Math.random()}`,
+                  type: 'briar_eruption',
+                  x: player.x,
+                  z: player.z,
+                  radius: ENEMY_SETTINGS.boss_gorgoth.groundEruptionRadius,
+                  timer: ENEMY_SETTINGS.boss_gorgoth.groundEruptionWindup,
+                  maxTimer: ENEMY_SETTINGS.boss_gorgoth.groundEruptionWindup,
+                  duration: 0.85,
+                  erupted: false,
+                  damage: ENEMY_SETTINGS.boss_gorgoth.groundEruptionDamage,
+                  mapId: 'dungeon',
+                });
+              } else {
+                // Ability 1: Ricochet Bramble Volley (bounces off walls to track corner campers)
+                enemy.bossAction = 'telegraphing_ricochet';
+                enemy.bossAttackType = 'ricochet_volley';
+                enemy.castTimer = ENEMY_SETTINGS.boss_gorgoth.projectileWindup;
+                enemy.bossTelegraphTimer = ENEMY_SETTINGS.boss_gorgoth.projectileWindup;
+                soundManager.playBossCharge();
+              }
             } else {
               enemy.rangedCooldown = 1.0;
             }
@@ -1665,6 +1744,72 @@ class GameLoop {
     activeProjectiles.push(proj);
   });
 
+    // --- 7b. GROUND HAZARDS SIMULATION (Telegraphed Briar Eruptions) ---
+    const activeGroundHazards: GroundHazardState[] = [];
+    groundHazards.forEach((hazard) => {
+      if (hazard.mapId !== store.currentMap) return;
+
+      if (!hazard.erupted) {
+        hazard.timer -= dt;
+        if (hazard.timer <= 0) {
+          hazard.erupted = true;
+          hazard.duration = 0.85;
+          soundManager.playSpikesErupt();
+          screenShake = 0.25;
+
+          // Check damage against player standing in hazard zone
+          const distToHazard = Math.hypot(player.x - hazard.x, player.z - hazard.z);
+          if (distToHazard < hazard.radius && player.iFrames <= 0) {
+            player.health = Math.max(0, player.health - hazard.damage);
+            player.iFrames = 1.0;
+            damageFlash = 0.8;
+            soundManager.playPlayerHurt();
+
+            // Knock player away from hazard center
+            const dirX = (player.x - hazard.x) / (distToHazard || 0.001);
+            const dirZ = (player.z - hazard.z) / (distToHazard || 0.001);
+            player.vx = dirX * 6.5;
+            player.vz = dirZ * 6.5;
+
+            if (player.health <= 0) {
+              soundManager.stopMusic();
+              soundManager.playGameOver();
+              useGameStore.setState({
+                gameState: 'game_over',
+                player,
+                stats,
+              });
+              return;
+            }
+          }
+
+          // Spawn ground eruption particles
+          for (let p = 0; p < 8; p++) {
+            activeParticles.push({
+              id: `erupt_part_${Date.now()}_${Math.random()}`,
+              type: 'leaf',
+              x: hazard.x + (Math.random() - 0.5) * hazard.radius * 1.5,
+              y: 0.3,
+              z: hazard.z + (Math.random() - 0.5) * hazard.radius * 1.5,
+              vx: (Math.random() - 0.5) * 3.5,
+              vy: 1.5 + Math.random() * 2.5,
+              vz: (Math.random() - 0.5) * 3.5,
+              size: 0.12,
+              color: '#d66e3b',
+              life: 0.4,
+              maxLife: 0.4,
+            });
+          }
+        }
+        activeGroundHazards.push(hazard);
+      } else {
+        hazard.duration -= dt;
+        if (hazard.duration > 0) {
+          activeGroundHazards.push(hazard);
+        }
+      }
+    });
+
     // --- 8. QUEST PROGRESSION & TRANSITIONS ---
     // A. Overworld -> Dungeon Entrance
     if (store.currentMap === 'overworld') {
@@ -1796,6 +1941,7 @@ class GameLoop {
       breakables,
       pickups: activePickups,
       projectiles: activeProjectiles,
+      groundHazards: activeGroundHazards,
       activeParticles,
       quest,
       stats,
