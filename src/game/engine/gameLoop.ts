@@ -727,8 +727,22 @@ class GameLoop {
               if (enemy.pathUpdateTimer !== undefined) enemy.pathUpdateTimer -= dt;
 
               if (enemy.pathWaypoints && enemy.pathWaypoints.length > 0) {
-                if (Math.hypot(enemy.x - enemy.pathWaypoints[0].x, enemy.z - enemy.pathWaypoints[0].z) < 0.5 && enemy.pathWaypoints.length > 1) {
-                  enemy.pathWaypoints.shift();
+                const distToFirst = Math.hypot(enemy.x - enemy.pathWaypoints[0].x, enemy.z - enemy.pathWaypoints[0].z);
+                if (enemy.pathWaypoints.length > 1) {
+                  const hasLoSToNext = hasLineOfSight(
+                    enemy.x,
+                    enemy.z,
+                    enemy.pathWaypoints[1].x,
+                    enemy.pathWaypoints[1].z,
+                    enemy.radius,
+                    currentMapData,
+                    quest.dungeonGateOpen,
+                    store.currentMap,
+                    breakables
+                  );
+                  if (distToFirst < 0.55 || hasLoSToNext) {
+                    enemy.pathWaypoints.shift();
+                  }
                 }
                 navTargetX = enemy.pathWaypoints[0].x;
                 navTargetZ = enemy.pathWaypoints[0].z;
@@ -890,8 +904,22 @@ class GameLoop {
           }
 
           if (enemy.pathWaypoints && enemy.pathWaypoints.length > 0) {
-            if (Math.hypot(enemy.x - enemy.pathWaypoints[0].x, enemy.z - enemy.pathWaypoints[0].z) < 0.45 && enemy.pathWaypoints.length > 1) {
-              enemy.pathWaypoints.shift();
+            const distToFirst = Math.hypot(enemy.x - enemy.pathWaypoints[0].x, enemy.z - enemy.pathWaypoints[0].z);
+            if (enemy.pathWaypoints.length > 1) {
+              const hasLoSToNext = hasLineOfSight(
+                enemy.x,
+                enemy.z,
+                enemy.pathWaypoints[1].x,
+                enemy.pathWaypoints[1].z,
+                enemy.radius,
+                currentMapData,
+                quest.dungeonGateOpen,
+                store.currentMap,
+                breakables
+              );
+              if (distToFirst < 0.55 || hasLoSToNext) {
+                enemy.pathWaypoints.shift();
+              }
             }
             navTargetX = enemy.pathWaypoints[0].x;
             navTargetZ = enemy.pathWaypoints[0].z;

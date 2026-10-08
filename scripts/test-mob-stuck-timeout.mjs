@@ -247,12 +247,14 @@ async function run() {
 
   // --- TEST 5: SWORD DEFLECTION OF BOSS PROJECTILE ---
   console.log('Test 5: Player sword swing deflects boss projectile back...');
-  const deflectionResult = await page.evaluate(async () => {
+  await page.evaluate(() => {
     const store = window.__gameStore;
     // Place a boss projectile heading directly towards player at (10.0, 14.0)
     store.setState((prev) => ({
+      gameState: 'playing',
       player: {
         ...prev.player,
+        health: 6,
         x: 10.0,
         z: 14.0,
         facingAngle: 0, // facing +Z towards incoming thorn
@@ -263,9 +265,9 @@ async function run() {
         {
           id: 'test_deflect_proj',
           x: 10.0,
-          z: 14.5,
+          z: 14.8,
           vx: 0,
-          vz: -4.0,
+          vz: -1.5,
           radius: 0.3,
           damage: 1,
           life: 3.0,
@@ -279,14 +281,22 @@ async function run() {
 
     // Trigger sword swing update
     window.__gameLoop.mouseAttackRequested = true;
-    await new Promise((r) => setTimeout(r, 120));
+  });
 
+  // Wait 150ms for game loop to tick and register sword deflection
+  await new Promise((r) => setTimeout(r, 150));
+
+  const deflectionResult = await page.evaluate(() => {
+    const store = window.__gameStore;
     const proj = store.getState().projectiles.find((p) => p.id === 'test_deflect_proj');
     return {
       projExists: !!proj,
       source: proj?.source,
       vz: proj?.vz,
       color: proj?.color,
+      isAttacking: store.getState().player.isAttacking,
+      attackCooldown: store.getState().player.attackCooldown,
+      mouseReq: window.__gameLoop.mouseAttackRequested,
     };
   });
   console.log('Deflection result:', deflectionResult);
