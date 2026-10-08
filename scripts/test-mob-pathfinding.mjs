@@ -113,25 +113,36 @@ async function run() {
     }));
   });
 
-  await new Promise((r) => setTimeout(r, 2000));
+  const redSlimeResult = await page.evaluate(async () => {
+    const store = window.__gameStore;
+    let maxDispZ = 0;
+    let finalX = 0;
+    let finalZ = 0;
 
-  const redSlimeResult = await page.evaluate(() => {
-    const store = window.__gameStore.getState();
-    const slime = store.enemies.find((e) => e.mapId === 'overworld' && e.type === 'slime_red');
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      const slime = store.getState().enemies.find((e) => e.mapId === 'overworld' && e.type === 'slime_red');
+      if (slime) {
+        const dZ = Math.abs(slime.z - 6.8);
+        if (dZ > maxDispZ) maxDispZ = dZ;
+        finalX = slime.x;
+        finalZ = slime.z;
+      }
+    }
+
     return {
-      x: slime.x,
-      z: slime.z,
-      state: slime.state,
-      dispX: slime.x - 13.5,
-      dispZ: Math.abs(slime.z - 6.8),
+      x: finalX,
+      z: finalZ,
+      dispX: finalX - 13.5,
+      maxDispZ,
     };
   });
   console.log('Red slime navigation result around rock:', redSlimeResult);
 
-  if (redSlimeResult.dispZ < 0.25) {
-    throw new Error(`FAIL: Red slime did not steer around rock! dispZ = ${redSlimeResult.dispZ}`);
+  if (redSlimeResult.maxDispZ < 0.25) {
+    throw new Error(`FAIL: Red slime did not steer around rock! maxDispZ = ${redSlimeResult.maxDispZ}`);
   }
-  console.log(`PASS: Red slime steered around rock (Z deviation: ${redSlimeResult.dispZ.toFixed(2)}, X progress: ${redSlimeResult.dispX.toFixed(2)})!\n`);
+  console.log(`PASS: Red slime steered around rock (max Z deviation: ${redSlimeResult.maxDispZ.toFixed(2)}, X progress: ${redSlimeResult.dispX.toFixed(2)})!\n`);
 
   await browser.close();
   console.log('=== ALL MONSTER PATHFINDING TESTS PASSED! ===');

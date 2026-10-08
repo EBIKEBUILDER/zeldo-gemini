@@ -237,8 +237,19 @@ class GameLoop {
       PLAYER_RADIUS,
       currentMapData,
       quest.dungeonGateOpen,
-      store.currentMap
+      store.currentMap,
+      breakables
     );
+
+    // If movement along an axis was arrested by a collider, zero velocity along that axis
+    // Prevents knockback or momentum from pinning the player against walls/trees
+    if (Math.abs(resolvedPos.x - player.x) < 0.0001 && Math.abs(desiredDx) > 0.001) {
+      player.vx = 0;
+    }
+    if (Math.abs(resolvedPos.z - player.z) < 0.0001 && Math.abs(desiredDz) > 0.001) {
+      player.vz = 0;
+    }
+
     player.x = resolvedPos.x;
     player.z = resolvedPos.z;
 
@@ -247,7 +258,8 @@ class GameLoop {
       PLAYER_RADIUS,
       currentMapData,
       quest.dungeonGateOpen,
-      store.currentMap
+      store.currentMap,
+      breakables
     );
     player.x = depenPlayer.x;
     player.z = depenPlayer.z;
@@ -629,13 +641,54 @@ class GameLoop {
       const isPlayerInSpawnSafeZone =
         store.currentMap === 'overworld' && playerDistToSpawn < SPAWN_SAFE_RADIUS;
 
-      const aggroRadius = enemy.type === 'boss_gorgoth' ? 16.0 : 5.5;
+      const isBoss = enemy.type === 'boss_gorgoth';
+      const enemySettings = isBoss
+        ? ENEMY_SETTINGS.boss_gorgoth
+        : enemy.type === 'slime_red'
+        ? ENEMY_SETTINGS.slime_red
+        : ENEMY_SETTINGS.slime_green;
+
+      const aggroRadius = enemySettings.aggroRadius;
+      const leashRadius = enemySettings.leashRadius;
+      const maxPursuitDuration = enemySettings.pursuitDuration;
 
       // Boss Gorgoth only aggros once gate is unlocked and player approaches/enters the sanctum
       const canBossAggro =
-        enemy.type !== 'boss_gorgoth' || (quest.dungeonGateOpen && player.z >= 11.0);
+        !isBoss || (quest.dungeonGateOpen && player.z >= 11.0);
 
-      if (!isPlayerInSpawnSafeZone && canBossAggro && distToPlayer < aggroRadius) {
+      // Initialize chase timer
+      if (enemy.chaseTimer === undefined) {
+        enemy.chaseTimer = 0;
+      }
+
+      // Determine active chase:
+      let shouldChase = false;
+      if (!isPlayerInSpawnSafeZone && canBossAggro) {
+        if (enemy.state === 'chase') {
+          // Already in active pursuit:
+          // If player is outside initial aggro radius, decrement pursuit persistence timer
+          if (distToPlayer > aggroRadius) {
+            enemy.chaseTimer = Math.max(0, enemy.chaseTimer - dt);
+          } else {
+            // Proximity continuously refreshes pursuit persistence timer
+            enemy.chaseTimer = maxPursuitDuration;
+          }
+
+          // Persistent chase: do NOT give up unless player gains a significant distance (> leashRadius)
+          // OR player was able to completely elude them for an extended period of time (chaseTimer <= 0)
+          if (distToPlayer < leashRadius && (enemy.chaseTimer > 0 || isBoss)) {
+            shouldChase = true;
+          }
+        } else {
+          // In idle: initiate pursuit when player enters aggro radius
+          if (distToPlayer < aggroRadius) {
+            shouldChase = true;
+            enemy.chaseTimer = maxPursuitDuration;
+          }
+        }
+      }
+
+      if (shouldChase) {
         // Aggro & Chase!
         enemy.state = 'chase';
 
@@ -681,7 +734,8 @@ class GameLoop {
             currentMapData,
             quest.dungeonGateOpen,
             store.currentMap,
-            enemy.steeringBias || 1
+            enemy.steeringBias || 1,
+            breakables
           );
           enemy.x = steer.x;
           enemy.z = steer.z;
@@ -727,7 +781,8 @@ class GameLoop {
               0.4,
               currentMapData,
               quest.dungeonGateOpen,
-              store.currentMap
+              store.currentMap,
+              breakables
             );
             // Trigger ranged attack if player is keeping distance, hiding behind a pillar, or periodically
             if (distToPlayer > 3.0 || !hasClearLoS || distToPlayer > 2.2) {
@@ -755,6 +810,14 @@ class GameLoop {
           player.vx = pKnockX;
           player.vz = pKnockZ;
 
+          // Attack recoil: enemy bounces back slightly after landing hit
+          // Ensures breathing room and prevents physical pinning against trees/walls
+          if (enemy.type !== 'boss_gorgoth') {
+            enemy.hitstunTimer = 0.15;
+            enemy.vx = -pKnockX * 0.45;
+            enemy.vz = -pKnockZ * 0.45;
+          }
+
           // Check for Game Over
           if (player.health <= 0) {
             soundManager.stopMusic();
@@ -768,8 +831,9 @@ class GameLoop {
           }
         }
       } else {
-        // Idle wander
+        // Idle wander (gave up pursuit or out of range)
         enemy.state = 'idle';
+        enemy.chaseTimer = 0;
         enemy.hopCycle += dt * 2.0;
         if (Math.sin(enemy.hopCycle) > 0.8) {
           const wanderDx = Math.sin(enemy.facingAngle) * enemy.speed * 0.4 * dt;
@@ -808,7 +872,7 @@ class GameLoop {
       );
 
       if (repulsion) {
-        // Constrain player movement against props and walls
+        // Constrain player movement against props, breakables, and walls
         const resolvedPlayer = resolveWallSliding(
           player.x,
           player.z,
@@ -817,7 +881,8 @@ class GameLoop {
           PLAYER_RADIUS,
           currentMapData,
           quest.dungeonGateOpen,
-          store.currentMap
+          store.currentMap,
+          breakables
         );
 
         const moveX = resolvedPlayer.x - player.x;
@@ -837,7 +902,8 @@ class GameLoop {
           enemy.radius,
           currentMapData,
           quest.dungeonGateOpen,
-          store.currentMap
+          store.currentMap,
+          breakables
         );
         enemy.x = resolvedEnemy.x;
         enemy.z = resolvedEnemy.z;
@@ -850,7 +916,8 @@ class GameLoop {
       PLAYER_RADIUS,
       currentMapData,
       quest.dungeonGateOpen,
-      store.currentMap
+      store.currentMap,
+      breakables
     );
     player.x = postRepulsionDepen.x;
     player.z = postRepulsionDepen.z;
@@ -879,7 +946,8 @@ class GameLoop {
             e1.radius,
             currentMapData,
             quest.dungeonGateOpen,
-            store.currentMap
+            store.currentMap,
+            breakables
           );
           e1.x = r1.x;
           e1.z = r1.z;
@@ -891,7 +959,8 @@ class GameLoop {
             e2.radius,
             currentMapData,
             quest.dungeonGateOpen,
-            store.currentMap
+            store.currentMap,
+            breakables
           );
           e2.x = r2.x;
           e2.z = r2.z;
@@ -911,7 +980,7 @@ class GameLoop {
 
       // Key is picked up on contact or when touching pedestal
       if (pickup.type === 'key') {
-        if (dist < 1.2) {
+        if (dist < 1.35) {
           pickup.collected = true;
           quest.hasDungeonKey = true;
           soundManager.playKeyPickup();
@@ -935,18 +1004,24 @@ class GameLoop {
         return;
       }
 
-      // Magnet pull for rupees and hearts (when health is below max)
-      if (dist < PICKUP_MAGNET_RADIUS) {
+      // Immediate touch collect if already within collect radius
+      if (dist < PICKUP_COLLECT_RADIUS) {
+        pickup.collected = true;
+      } else if (dist < PICKUP_MAGNET_RADIUS) {
+        // Magnet pull for rupees and hearts
         pickup.magnetActive = true;
         const pullSpeed = PICKUP_MAGNET_SPEED * dt;
         pickup.x += (dx / dist) * pullSpeed;
         pickup.z += (dz / dist) * pullSpeed;
+
+        // Recheck distance after magnet pull to guarantee collection while running fast
+        const newDist = Math.hypot(player.x - pickup.x, player.z - pickup.z);
+        if (newDist < PICKUP_COLLECT_RADIUS) {
+          pickup.collected = true;
+        }
       }
 
-      // Touch collect
-      if (dist < PICKUP_COLLECT_RADIUS) {
-        pickup.collected = true;
-
+      if (pickup.collected) {
         if (pickup.type === 'rupee') {
           stats.rupees += pickup.value;
           soundManager.playRupeePickup();
@@ -1003,7 +1078,7 @@ class GameLoop {
       const nextX = proj.x + proj.vx * dt;
       const nextZ = proj.z + proj.vz * dt;
 
-      // Obstacle collision test (walls, pillars, gate)
+      // Obstacle collision test (walls, pillars, pots, gate)
       if (
         isPositionBlocked(
           nextX,
@@ -1011,7 +1086,8 @@ class GameLoop {
           proj.radius,
           currentMapData,
           quest.dungeonGateOpen,
-          store.currentMap
+          store.currentMap,
+          breakables
         )
       ) {
         // Impact particles against obstacle

@@ -389,7 +389,7 @@ export function generateDungeon(): MapData {
     type: 'pedestal',
     x: DUNGEON_KEY_POS.x,
     z: DUNGEON_KEY_POS.z,
-    radius: 0.6,
+    radius: 0.75,
   });
 
   // Pillars in Boss Chamber for tactical cover

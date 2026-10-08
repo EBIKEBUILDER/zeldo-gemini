@@ -75,6 +75,7 @@ export interface EnemyState {
   rangedCooldown?: number;
   castTimer?: number;
   steeringBias?: number;
+  chaseTimer?: number;
 }
 
 export interface ProjectileState {

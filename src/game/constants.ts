@@ -65,7 +65,9 @@ export const ENEMY_SETTINGS = {
     speed: 2.2,
     radius: 0.42,
     damage: 1, // 1/2 heart
-    aggroRadius: 4.8,
+    aggroRadius: 5.2,
+    leashRadius: 14.0, // Long chase distance before mob drops pursuit
+    pursuitDuration: 4.5, // Seconds of persistence when losing sight/distance
     knockbackForce: 7.5,
   },
   slime_red: {
@@ -73,7 +75,9 @@ export const ENEMY_SETTINGS = {
     speed: 2.7,
     radius: 0.45,
     damage: 1,
-    aggroRadius: 5.5,
+    aggroRadius: 6.0,
+    leashRadius: 16.0,
+    pursuitDuration: 5.0,
     knockbackForce: 6.5,
   },
   boss_gorgoth: {
@@ -82,6 +86,8 @@ export const ENEMY_SETTINGS = {
     radius: 1.1,
     damage: 2, // 1 full heart contact damage
     aggroRadius: 16.0,
+    leashRadius: 24.0,
+    pursuitDuration: 99.0, // Relentless in boss sanctum
     knockbackForce: 0.4, // Heavy boss - minimal flinch, no stunlock
     poiseDuration: 0.9, // Seconds of hyper-armor where attacks cannot interrupt or push boss
     projectileSpeed: 6.0, // Units per second for bramble thorn
@@ -97,9 +103,9 @@ export const FIXED_TIMESTEP = 1 / 60; // ~0.016667 seconds
 export const MAX_SIMULATION_SUBSTEPS = 5; // prevent spiral of death on lag spikes
 
 // Magnet radius for rupees and hearts
-export const PICKUP_MAGNET_RADIUS = 2.4;
-export const PICKUP_COLLECT_RADIUS = 0.75;
-export const PICKUP_MAGNET_SPEED = 7.0;
+export const PICKUP_MAGNET_RADIUS = 3.2;
+export const PICKUP_COLLECT_RADIUS = 1.25;
+export const PICKUP_MAGNET_SPEED = 9.0;
 
 // Camera configuration
 export const CAMERA_OFFSET = {
