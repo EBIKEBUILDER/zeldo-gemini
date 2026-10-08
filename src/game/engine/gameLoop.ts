@@ -645,114 +645,97 @@ class GameLoop {
         enemy.hopCycle += dt * (isBoss ? 4.0 : 6.0);
         const moveSpeed = enemy.speed * (0.8 + 0.4 * Math.max(0, Math.sin(enemy.hopCycle)));
 
-        if (isBoss) {
-          // If boss is winding up a ranged bramble shot, pause movement to telegraph
+        // 1. If boss is winding up a ranged bramble shot, pause movement to telegraph
+        const isBossCasting = isBoss && enemy.castTimer && enemy.castTimer > 0;
+
+        if (isBossCasting) {
+          enemy.facingAngle = Math.atan2(dx, dz);
+          // Spawn swirling toxic briar particles
+          if (Math.random() < 0.4) {
+            activeParticles.push({
+              id: `briar_${Date.now()}_${Math.random()}`,
+              type: 'leaf',
+              x: enemy.x + (Math.random() - 0.5) * 1.3,
+              y: 0.5 + Math.random() * 0.7,
+              z: enemy.z + (Math.random() - 0.5) * 1.3,
+              vx: (Math.random() - 0.5) * 1.6,
+              vy: 1.2 + Math.random() * 1.8,
+              vz: (Math.random() - 0.5) * 1.6,
+              size: 0.12,
+              color: '#52b724',
+              life: 0.35,
+              maxLife: 0.35,
+            });
+          }
+        } else {
+          // ALL ENEMIES (Overworld Slimes, Dungeon Mobs, and Boss) use smart steering pathfinding!
+          // Intelligently maneuvers around trees, rocks, hedges, water, pillars, and walls.
+          const steer = resolveSmartSteering(
+            enemy.x,
+            enemy.z,
+            player.x,
+            player.z,
+            moveSpeed,
+            dt,
+            enemy.radius,
+            currentMapData,
+            quest.dungeonGateOpen,
+            store.currentMap,
+            enemy.steeringBias || 1
+          );
+          enemy.x = steer.x;
+          enemy.z = steer.z;
+          enemy.facingAngle = steer.facingAngle;
+          enemy.steeringBias = steer.chosenBias;
+        }
+
+        // 2. Boss Ranged Bramble Attack
+        if (isBoss && !quest.bossDefeated) {
+          if (enemy.rangedCooldown === undefined) {
+            enemy.rangedCooldown = 2.0; // initial grace period upon entering boss room
+          }
+
           if (enemy.castTimer && enemy.castTimer > 0) {
-            enemy.facingAngle = Math.atan2(dx, dz);
-            // Spawn swirling toxic briar particles
-            if (Math.random() < 0.4) {
-              activeParticles.push({
-                id: `briar_${Date.now()}_${Math.random()}`,
-                type: 'leaf',
-                x: enemy.x + (Math.random() - 0.5) * 1.3,
-                y: 0.5 + Math.random() * 0.7,
-                z: enemy.z + (Math.random() - 0.5) * 1.3,
-                vx: (Math.random() - 0.5) * 1.6,
-                vy: 1.2 + Math.random() * 1.8,
-                vz: (Math.random() - 0.5) * 1.6,
-                size: 0.12,
-                color: '#52b724',
-                life: 0.35,
-                maxLife: 0.35,
+            enemy.castTimer -= dt;
+            if (enemy.castTimer <= 0) {
+              // Launch bramble thorn projectile towards player
+              const pDist = Math.sqrt(dx * dx + dz * dz) || 0.001;
+              const pSpeed = ENEMY_SETTINGS.boss_gorgoth.projectileSpeed;
+              projectiles.push({
+                id: `proj_boss_${Date.now()}_${Math.random()}`,
+                x: enemy.x + (dx / pDist) * 1.1,
+                z: enemy.z + (dz / pDist) * 1.1,
+                vx: (dx / pDist) * pSpeed,
+                vz: (dz / pDist) * pSpeed,
+                radius: ENEMY_SETTINGS.boss_gorgoth.projectileRadius,
+                damage: ENEMY_SETTINGS.boss_gorgoth.projectileDamage,
+                life: 3.5,
+                maxLife: 3.5,
+                source: 'boss',
+                color: '#7bc637',
+                mapId: 'dungeon',
               });
+              soundManager.playBossShoot();
+              enemy.rangedCooldown = ENEMY_SETTINGS.boss_gorgoth.projectileCooldown + (Math.random() * 0.8 - 0.4);
             }
-          } else {
-            // Smart steering navigation around pillars, walls, and obstacles
-            const steer = resolveSmartSteering(
+          } else if (enemy.rangedCooldown <= 0) {
+            const hasClearLoS = hasLineOfSight(
               enemy.x,
               enemy.z,
               player.x,
               player.z,
-              moveSpeed,
-              dt,
-              enemy.radius,
+              0.4,
               currentMapData,
               quest.dungeonGateOpen,
-              store.currentMap,
-              enemy.steeringBias || 1
+              store.currentMap
             );
-            enemy.x = steer.x;
-            enemy.z = steer.z;
-            enemy.facingAngle = steer.facingAngle;
-            enemy.steeringBias = steer.chosenBias;
-          }
-
-          // Boss Ranged Bramble Attack
-          if (!quest.bossDefeated) {
-            if (enemy.rangedCooldown === undefined) {
-              enemy.rangedCooldown = 2.0; // initial grace period upon entering boss room
-            }
-
-            if (enemy.castTimer && enemy.castTimer > 0) {
-              enemy.castTimer -= dt;
-              if (enemy.castTimer <= 0) {
-                // Launch bramble thorn projectile towards player
-                const pDist = Math.sqrt(dx * dx + dz * dz) || 0.001;
-                const pSpeed = ENEMY_SETTINGS.boss_gorgoth.projectileSpeed;
-                projectiles.push({
-                  id: `proj_boss_${Date.now()}_${Math.random()}`,
-                  x: enemy.x + (dx / pDist) * 1.1,
-                  z: enemy.z + (dz / pDist) * 1.1,
-                  vx: (dx / pDist) * pSpeed,
-                  vz: (dz / pDist) * pSpeed,
-                  radius: ENEMY_SETTINGS.boss_gorgoth.projectileRadius,
-                  damage: ENEMY_SETTINGS.boss_gorgoth.projectileDamage,
-                  life: 3.5,
-                  maxLife: 3.5,
-                  source: 'boss',
-                  color: '#7bc637',
-                  mapId: 'dungeon',
-                });
-                soundManager.playBossShoot();
-                enemy.rangedCooldown = ENEMY_SETTINGS.boss_gorgoth.projectileCooldown + (Math.random() * 0.8 - 0.4);
-              }
-            } else if (enemy.rangedCooldown <= 0) {
-              const hasClearLoS = hasLineOfSight(
-                enemy.x,
-                enemy.z,
-                player.x,
-                player.z,
-                0.4,
-                currentMapData,
-                quest.dungeonGateOpen,
-                store.currentMap
-              );
-              // Trigger ranged attack if player is keeping distance, hiding behind a pillar, or periodically
-              if (distToPlayer > 3.0 || !hasClearLoS || distToPlayer > 2.2) {
-                enemy.castTimer = ENEMY_SETTINGS.boss_gorgoth.projectileWindup;
-              } else {
-                enemy.rangedCooldown = 1.0;
-              }
+            // Trigger ranged attack if player is keeping distance, hiding behind a pillar, or periodically
+            if (distToPlayer > 3.0 || !hasClearLoS || distToPlayer > 2.2) {
+              enemy.castTimer = ENEMY_SETTINGS.boss_gorgoth.projectileWindup;
+            } else {
+              enemy.rangedCooldown = 1.0;
             }
           }
-        } else {
-          // Standard slime chase
-          enemy.facingAngle = Math.atan2(dx, dz);
-          const moveDx = (dx / distToPlayer) * moveSpeed * dt;
-          const moveDz = (dz / distToPlayer) * moveSpeed * dt;
-
-          const resolved = resolveWallSliding(
-            enemy.x,
-            enemy.z,
-            moveDx,
-            moveDz,
-            enemy.radius,
-            currentMapData,
-            quest.dungeonGateOpen,
-            store.currentMap
-          );
-          enemy.x = resolved.x;
-          enemy.z = resolved.z;
         }
 
         // Contact damage against player
@@ -801,6 +784,10 @@ class GameLoop {
             quest.dungeonGateOpen,
             store.currentMap
           );
+          if (Math.hypot(resolved.x - enemy.x, resolved.z - enemy.z) < 0.0005) {
+            // If blocked while wandering, pick a new direction away from the obstacle
+            enemy.facingAngle = Math.random() * Math.PI * 2;
+          }
           enemy.x = resolved.x;
           enemy.z = resolved.z;
         } else if (Math.random() < 0.02) {

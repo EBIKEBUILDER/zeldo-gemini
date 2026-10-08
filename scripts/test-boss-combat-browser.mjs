@@ -188,12 +188,12 @@ async function run() {
   console.log('Testing Boss Ranged Projectile Attack...');
   await page.evaluate(() => {
     const store = window.__gameStore;
-    // Put Link far away at (14.0, 18.0) and trigger boss ranged cooldown = 0
+    // Put Link down the open chamber at (10.0, 13.5) and trigger boss ranged attack
     store.setState((prev) => ({
       player: {
         ...prev.player,
-        x: 14.0,
-        z: 18.0,
+        x: 10.0,
+        z: 13.5,
       },
       enemies: prev.enemies.map((e) => {
         if (e.type === 'boss_gorgoth') {
@@ -203,7 +203,7 @@ async function run() {
             z: 18.0,
             state: 'chase',
             rangedCooldown: 0,
-            castTimer: 0.1, // trigger cast almost immediately
+            castTimer: 0.05, // trigger cast almost immediately
           };
         }
         return e;
@@ -211,8 +211,8 @@ async function run() {
     }));
   });
 
-  // Wait 400ms for projectile to spawn and travel
-  await new Promise((r) => setTimeout(r, 400));
+  // Wait 250ms for projectile to spawn and travel
+  await new Promise((r) => setTimeout(r, 250));
 
   const projResult = await page.evaluate(() => {
     const store = window.__gameStore.getState();

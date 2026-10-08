@@ -337,6 +337,8 @@ export interface SteeringResult {
 
 // Smart obstacle steering for enemies and bosses
 // When direct path toward target is blocked by pillars, props, or walls,
+// Smart obstacle steering for all enemies (overworld slimes, dungeon mobs, and boss)
+// When direct path toward target is blocked by trees, rocks, hedges, water, pillars, or walls,
 // sweeps radial whiskers to find the clearest bypass path around obstacles.
 export function resolveSmartSteering(
   currentX: number,
@@ -361,7 +363,8 @@ export function resolveSmartSteering(
 
   const directAngle = Math.atan2(dx, dz);
   const stepDist = moveSpeed * dt;
-  const lookahead = Math.max(stepDist * 1.5, radius * 0.85);
+  // Adaptive lookahead: detect obstacles well in advance for both small slimes and large bosses
+  const lookahead = Math.max(stepDist * 2.5, radius * 1.25, 0.6);
 
   // 1. Test direct path first
   const directLookX = currentX + Math.sin(directAngle) * lookahead;
@@ -379,7 +382,7 @@ export function resolveSmartSteering(
       mapId
     );
     const moved = Math.hypot(directResolved.x - currentX, directResolved.z - currentZ);
-    if (moved > stepDist * 0.45) {
+    if (moved > stepDist * 0.4) {
       return {
         x: directResolved.x,
         z: directResolved.z,
@@ -393,16 +396,19 @@ export function resolveSmartSteering(
   // Bias controls whether we prefer steering clockwise or counter-clockwise
   const biasSign = preferredBias >= 0 ? 1 : -1;
   const angleOffsets = [
-    biasSign * 0.45,   // ~25 deg
-    -biasSign * 0.45,
-    biasSign * 0.9,    // ~50 deg
-    -biasSign * 0.9,
-    biasSign * 1.35,   // ~77 deg
-    -biasSign * 1.35,
-    biasSign * 1.8,    // ~103 deg
-    -biasSign * 1.8,
+    biasSign * 0.52,   // ~30 deg
+    -biasSign * 0.52,
+    biasSign * 1.05,   // ~60 deg
+    -biasSign * 1.05,
+    biasSign * 1.57,   // 90 deg (exact tangent sideways bypass)
+    -biasSign * 1.57,
+    biasSign * 2.09,   // ~120 deg (flank around wide objects)
+    -biasSign * 2.09,
+    biasSign * 2.53,   // ~145 deg (wide corner escape)
+    -biasSign * 2.53,
   ];
 
+  // Pass A: lookahead scan
   for (let i = 0; i < angleOffsets.length; i++) {
     const offset = angleOffsets[i];
     const candidateAngle = directAngle + offset;
@@ -424,7 +430,41 @@ export function resolveSmartSteering(
       );
 
       const moved = Math.hypot(candResolved.x - currentX, candResolved.z - currentZ);
-      if (moved > stepDist * 0.35) {
+      if (moved > stepDist * 0.25) {
+        return {
+          x: candResolved.x,
+          z: candResolved.z,
+          facingAngle: candidateAngle,
+          chosenBias: offset >= 0 ? 1 : -1,
+        };
+      }
+    }
+  }
+
+  // Pass B: immediate clearance scan (when right next to tight tree cluster or wall)
+  const shortLook = Math.max(stepDist * 1.5, radius * 0.6);
+  for (let i = 0; i < angleOffsets.length; i++) {
+    const offset = angleOffsets[i];
+    const candidateAngle = directAngle + offset;
+    const shortX = currentX + Math.sin(candidateAngle) * shortLook;
+    const shortZ = currentZ + Math.cos(candidateAngle) * shortLook;
+
+    if (!isPositionBlocked(shortX, shortZ, radius, map, isGateOpen, mapId)) {
+      const stepX = Math.sin(candidateAngle) * stepDist;
+      const stepZ = Math.cos(candidateAngle) * stepDist;
+      const candResolved = resolveWallSliding(
+        currentX,
+        currentZ,
+        stepX,
+        stepZ,
+        radius,
+        map,
+        isGateOpen,
+        mapId
+      );
+
+      const moved = Math.hypot(candResolved.x - currentX, candResolved.z - currentZ);
+      if (moved > stepDist * 0.2) {
         return {
           x: candResolved.x,
           z: candResolved.z,
