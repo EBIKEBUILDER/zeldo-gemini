@@ -5,6 +5,7 @@ import {
   StandardMaterial,
   Color3,
   TransformNode,
+  AbstractMesh,
 } from '@babylonjs/core';
 
 // Cache materials to avoid redundant shader compilation
@@ -501,16 +502,24 @@ export function createGrassMesh(scene: Scene): TransformNode {
   const planeCount = Math.floor(Math.random() * 3) + 2; // 2, 3, or 4
   const baseAngle = Math.random() * Math.PI;
 
+  const blades: Mesh[] = [];
   for (let i = 0; i < planeCount; i++) {
     const angle = baseAngle + (Math.PI / planeCount) * i;
     const width = 0.48 + (Math.random() - 0.5) * 0.08;
     const height = 0.44 + (Math.random() - 0.5) * 0.06;
 
     const blade = MeshBuilder.CreatePlane(`blade_${i}`, { width, height }, scene);
-    blade.material = grassMat;
     blade.rotation.y = angle;
     blade.position.y = height * 0.5;
-    blade.parent = root;
+    blades.push(blade);
+  }
+
+  const merged = Mesh.MergeMeshes(blades, true, true, undefined, false, false);
+  if (merged) {
+    merged.material = grassMat;
+    merged.parent = root;
+    merged.freezeWorldMatrix();
+    merged.cullingStrategy = AbstractMesh.CULLINGSTRATEGY_BOUNDINGSPHERE_ONLY;
   }
 
   return root;
@@ -526,18 +535,22 @@ export function createPotMesh(scene: Scene): TransformNode {
     height: 0.45,
     tessellation: 8,
   }, scene);
-  belly.material = potMat;
   belly.position.y = 0.22;
-  belly.parent = root;
 
   const rim = MeshBuilder.CreateTorus('pot_rim', {
     diameter: 0.46,
     thickness: 0.08,
     tessellation: 8,
   }, scene);
-  rim.material = potMat;
   rim.position.y = 0.44;
-  rim.parent = root;
+
+  const merged = Mesh.MergeMeshes([belly, rim], true, true, undefined, false, false);
+  if (merged) {
+    merged.material = potMat;
+    merged.parent = root;
+    merged.freezeWorldMatrix();
+    merged.cullingStrategy = AbstractMesh.CULLINGSTRATEGY_BOUNDINGSPHERE_ONLY;
+  }
 
   return root;
 }
@@ -866,19 +879,21 @@ export function createFacetedTree(scene: Scene): TransformNode {
     diameter: 1.45,
     segments: 5,
   }, scene);
-  dome2.material = foliageMat2;
   dome2.scaling.set(1.05, 0.9, 1.05);
   dome2.position.set(0.08, 2.15, -0.05);
-  dome2.parent = root;
 
   const dome3 = MeshBuilder.CreateSphere('foliage_dome3', {
     diameter: 0.95,
     segments: 4,
   }, scene);
-  dome3.material = foliageMat2;
   dome3.scaling.set(1.0, 0.95, 1.0);
   dome3.position.set(-0.06, 2.7, 0.04);
-  dome3.parent = root;
+
+  const upperFoliage = Mesh.MergeMeshes([dome2, dome3], true, true, undefined, false, false);
+  if (upperFoliage) {
+    upperFoliage.material = foliageMat2;
+    upperFoliage.parent = root;
+  }
 
   return root;
 }
@@ -931,9 +946,7 @@ export function createStonePillar(scene: Scene): TransformNode {
 
   // Stepped base
   const base = MeshBuilder.CreateBox('pillar_base', { width: 1.15, height: 0.3, depth: 1.15 }, scene);
-  base.material = trimMat;
   base.position.y = 0.15;
-  base.parent = root;
 
   // Main fluted shaft
   const shaft = MeshBuilder.CreateCylinder('pillar_shaft', {
@@ -948,9 +961,13 @@ export function createStonePillar(scene: Scene): TransformNode {
 
   // Carved capital on top
   const capital = MeshBuilder.CreateBox('pillar_capital', { width: 1.1, height: 0.25, depth: 1.1 }, scene);
-  capital.material = trimMat;
   capital.position.y = 2.45;
-  capital.parent = root;
+
+  const mergedTrim = Mesh.MergeMeshes([base, capital], true, true, undefined, false, false);
+  if (mergedTrim) {
+    mergedTrim.material = trimMat;
+    mergedTrim.parent = root;
+  }
 
   return root;
 }
@@ -983,26 +1000,32 @@ export function createDungeonGate(scene: Scene): TransformNode {
   const root = new TransformNode('gate_root', scene);
   const ironMat = palette.get(scene, 'gate_iron', new Color3(0.25, 0.28, 0.32), new Color3(0.3, 0.3, 0.3));
 
+  const pieces: Mesh[] = [];
   for (let i = -1.2; i <= 1.2; i += 0.4) {
     const bar = MeshBuilder.CreateCylinder(`gate_bar_${i}`, {
       diameter: 0.09,
       height: 2.4,
       tessellation: 6,
     }, scene);
-    bar.material = ironMat;
     bar.position.set(i, 1.2, 0);
-    bar.parent = root;
+    pieces.push(bar);
   }
 
   const crossbarTop = MeshBuilder.CreateBox('crossbar_top', { width: 2.6, height: 0.14, depth: 0.12 }, scene);
-  crossbarTop.material = ironMat;
   crossbarTop.position.set(0, 2.1, 0);
-  crossbarTop.parent = root;
+  pieces.push(crossbarTop);
 
   const crossbarMid = MeshBuilder.CreateBox('crossbar_mid', { width: 2.6, height: 0.14, depth: 0.12 }, scene);
-  crossbarMid.material = ironMat;
   crossbarMid.position.set(0, 1.1, 0);
-  crossbarMid.parent = root;
+  pieces.push(crossbarMid);
+
+  const mergedGate = Mesh.MergeMeshes(pieces, true, true, undefined, false, false);
+  if (mergedGate) {
+    mergedGate.name = 'dungeon_gate_mesh';
+    mergedGate.material = ironMat;
+    mergedGate.parent = root;
+    mergedGate.cullingStrategy = AbstractMesh.CULLINGSTRATEGY_BOUNDINGSPHERE_ONLY;
+  }
 
   return root;
 }

@@ -13,6 +13,7 @@ import {
   StandardMaterial,
   TransformNode,
   Matrix,
+  AbstractMesh,
 } from '@babylonjs/core';
 import { Vector2D } from '@/types/game';
 import { useGameStore } from '../state/gameStore';
@@ -74,15 +75,24 @@ export class BabylonRenderer {
   private hazardMeshes: Map<string, { rune: TransformNode; spikes: TransformNode }> = new Map();
   private particleMeshes: Map<string, Mesh> = new Map();
 
-  // Props
+  // Props & Merged Terrain
   private gateMesh: TransformNode | null = null;
   private chest: ChestMeshes | null = null;
-  private waterTiles: Mesh[] = [];
+  private mergedWaterMesh: Mesh | null = null;
 
   // Flash materials
   private whiteFlashMat: StandardMaterial;
 
   private isDisposed: boolean = false;
+
+  // Performance telemetry
+  public getFps(): number {
+    return Math.round(this.engine.getFps() || 60);
+  }
+
+  public getDrawCalls(): number {
+    return this.scene ? this.scene.getActiveMeshes().length : 0;
+  }
 
   constructor(canvas: HTMLCanvasElement) {
     this.engine = new Engine(canvas, true, {
@@ -108,6 +118,10 @@ export class BabylonRenderer {
 
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0.08, 0.1, 0.14, 1.0);
+    this.scene.skipPointerMovePicking = true;
+    this.scene.autoClear = true;
+    this.scene.autoClearDepthAndStencil = true;
+
     if (typeof window !== 'undefined') {
       (window as unknown as { __scene: Scene }).__scene = this.scene;
     }
@@ -117,7 +131,7 @@ export class BabylonRenderer {
     this.dungeonRoot = new TransformNode('dungeon_root', this.scene);
     this.dungeonRoot.setEnabled(false);
 
-    // Camera setup with classic Zeldo downward tilt
+    // Camera setup with classic Zeldo downward tilt and optimized depth bounds
     this.camera = new UniversalCamera(
       'zeldo_cam',
       new Vector3(7.5, CAMERA_OFFSET.y, 6.0 + CAMERA_OFFSET.z),
@@ -125,6 +139,8 @@ export class BabylonRenderer {
     );
     this.camera.setTarget(new Vector3(7.5, 0.5, 6.0));
     this.camera.fov = 0.72;
+    this.camera.minZ = 0.5;
+    this.camera.maxZ = 85.0;
 
     // Lighting: Overworld Sun + Ambient
     this.hemiLight = new HemisphericLight('hemi', new Vector3(0, 1, 0), this.scene);
@@ -146,7 +162,7 @@ export class BabylonRenderer {
       new Color3(1, 1, 1)
     );
 
-    // Build World Geometry
+    // Build World Geometry with high-performance mesh merging
     this.buildOverworldTerrain();
     this.buildDungeonTerrain();
 
@@ -158,11 +174,6 @@ export class BabylonRenderer {
 
     this.scene.onBeforeRenderObservable.add(() => {
       this.syncSceneWithState();
-      for (const mesh of this.scene.meshes) {
-        if (!mesh.material) {
-          console.error('[MESH NO MATERIAL]', mesh.name, 'parent:', mesh.parent ? mesh.parent.name : 'none');
-        }
-      }
     });
 
     // Execute render loop only once shaders and scene are ready
@@ -219,7 +230,7 @@ export class BabylonRenderer {
     });
   }
 
-  // --- BUILD OVERWORLD GEOMETRY ---
+  // --- BUILD OVERWORLD GEOMETRY (HIGH-PERFORMANCE BATCH MERGING) ---
   private buildOverworldTerrain() {
     const store = useGameStore.getState();
     const map = store.overworldMap;
@@ -239,49 +250,74 @@ export class BabylonRenderer {
     const hedgeMat = palette.get(this.scene, 'tile_hedge', new Color3(0.12, 0.42, 0.18));
     const cliffMat = palette.get(this.scene, 'tile_cliff', new Color3(0.42, 0.45, 0.48));
 
+    // Group tile boxes by material to merge into single GPU draw calls
+    const tileGroups: Record<string, Mesh[]> = {
+      grass: [],
+      dirt: [],
+      flower: [],
+      bridge: [],
+      hedge: [],
+      cliff: [],
+      water: [],
+    };
+
     // Ground plane
     for (let x = 0; x < map.width; x++) {
       for (let z = 0; z < map.height; z++) {
         const tile = map.tiles[x][z];
-        const isTall = tile.type === 'hedge' || tile.type === 'dungeon_wall';
+        const isHedge = tile.type === 'hedge';
+        const isCliff = tile.type === 'dungeon_wall';
+        const isWater = tile.type === 'water';
+        const isBridge = tile.type === 'bridge';
+
+        const height = isHedge ? 1.2 : isCliff ? 2.5 : 0.2;
+        const posY = isHedge ? 0.6 : isCliff ? 1.25 : isWater ? -0.15 : isBridge ? 0.02 : -0.1;
 
         const tileMesh = MeshBuilder.CreateBox(
-          `tile_${x}_${z}`,
+          `tile_temp_${x}_${z}`,
           {
             width: 1.0,
             depth: 1.0,
-            height: tile.type === 'hedge' ? 1.2 : tile.type === 'dungeon_wall' ? 2.5 : 0.2,
+            height,
           },
           this.scene
         );
+        tileMesh.position.set(x + 0.5, posY, z + 0.5);
 
-        tileMesh.position.set(
-          x + 0.5,
-          tile.type === 'hedge' ? 0.6 : tile.type === 'dungeon_wall' ? 1.25 : -0.1,
-          z + 0.5
-        );
-
-        if (tile.type === 'grass') tileMesh.material = grassMat;
-        else if (tile.type === 'dirt' || tile.type === 'doorway') tileMesh.material = dirtMat;
-        else if (tile.type === 'flower') tileMesh.material = flowerMat;
-        else if (tile.type === 'water') {
-          tileMesh.material = waterMat;
-          tileMesh.position.y = -0.15;
-          this.waterTiles.push(tileMesh);
-        } else if (tile.type === 'bridge') {
-          tileMesh.material = bridgeMat;
-          tileMesh.position.y = 0.02;
-        } else if (tile.type === 'hedge') {
-          tileMesh.material = hedgeMat;
-        } else if (tile.type === 'dungeon_wall') {
-          tileMesh.material = cliffMat;
-        } else {
-          tileMesh.material = grassMat;
-        }
-
-        tileMesh.parent = this.overworldRoot;
+        if (tile.type === 'grass') tileGroups.grass.push(tileMesh);
+        else if (tile.type === 'dirt' || tile.type === 'doorway') tileGroups.dirt.push(tileMesh);
+        else if (tile.type === 'flower') tileGroups.flower.push(tileMesh);
+        else if (isWater) tileGroups.water.push(tileMesh);
+        else if (isBridge) tileGroups.bridge.push(tileMesh);
+        else if (isHedge) tileGroups.hedge.push(tileMesh);
+        else if (isCliff) tileGroups.cliff.push(tileMesh);
+        else tileGroups.grass.push(tileMesh);
       }
     }
+
+    const mergeBatch = (name: string, list: Mesh[], mat: StandardMaterial, isDynamicWater: boolean = false) => {
+      if (list.length === 0) return null;
+      const merged = Mesh.MergeMeshes(list, true, true, undefined, false, false);
+      if (merged) {
+        merged.name = `merged_overworld_${name}`;
+        merged.material = mat;
+        merged.parent = this.overworldRoot;
+        if (!isDynamicWater) {
+          merged.freezeWorldMatrix();
+        }
+        merged.cullingStrategy = AbstractMesh.CULLINGSTRATEGY_BOUNDINGSPHERE_ONLY;
+        return merged;
+      }
+      return null;
+    };
+
+    mergeBatch('grass', tileGroups.grass, grassMat);
+    mergeBatch('dirt', tileGroups.dirt, dirtMat);
+    mergeBatch('flower', tileGroups.flower, flowerMat);
+    mergeBatch('bridge', tileGroups.bridge, bridgeMat);
+    mergeBatch('hedge', tileGroups.hedge, hedgeMat);
+    mergeBatch('cliff', tileGroups.cliff, cliffMat);
+    this.mergedWaterMesh = mergeBatch('water', tileGroups.water, waterMat, true);
 
     // Overworld Props
     map.props.forEach((prop) => {
@@ -303,42 +339,47 @@ export class BabylonRenderer {
         well.position.y = 0.4;
         node = well;
       } else if (prop.type === 'archway') {
-        const archRoot = new TransformNode('arch_root', this.scene);
         const archStoneMat = palette.get(this.scene, 'arch_stone', new Color3(0.35, 0.38, 0.42));
 
         const archL = MeshBuilder.CreateBox('arch_l', { width: 0.8, height: 2.8, depth: 1.0 }, this.scene);
-        archL.material = archStoneMat;
         archL.position.set(-1.2, 1.4, 0);
-        archL.parent = archRoot;
 
         const archR = MeshBuilder.CreateBox('arch_r', { width: 0.8, height: 2.8, depth: 1.0 }, this.scene);
-        archR.material = archStoneMat;
         archR.position.set(1.2, 1.4, 0);
-        archR.parent = archRoot;
 
         const archTop = MeshBuilder.CreateBox('arch_top', { width: 3.2, height: 0.8, depth: 1.2 }, this.scene);
-        archTop.material = archStoneMat;
         archTop.position.set(0, 3.2, 0);
-        archTop.parent = archRoot;
 
-        node = archRoot;
+        const archMesh = Mesh.MergeMeshes([archL, archR, archTop], true, true, undefined, false, false);
+        if (archMesh) {
+          archMesh.name = 'dungeon_archway_mesh';
+          archMesh.material = archStoneMat;
+          node = archMesh;
+        }
       }
 
       if (node) {
         node.position.x = prop.x;
         node.position.z = prop.z;
         node.parent = this.overworldRoot;
+        node.computeWorldMatrix(true);
+        node.getChildMeshes().forEach((m) => {
+          m.freezeWorldMatrix();
+          m.cullingStrategy = AbstractMesh.CULLINGSTRATEGY_BOUNDINGSPHERE_ONLY;
+        });
       }
     });
   }
 
-  // --- BUILD DUNGEON GEOMETRY ---
+  // --- BUILD DUNGEON GEOMETRY (HIGH-PERFORMANCE BATCH MERGING) ---
   private buildDungeonTerrain() {
     const store = useGameStore.getState();
     const map = store.dungeonMap;
 
     const floorMat = palette.get(this.scene, 'dungeon_floor', new Color3(0.32, 0.35, 0.4));
     const wallMat = palette.get(this.scene, 'dungeon_wall', new Color3(0.2, 0.22, 0.26));
+
+    const dungeonGroups: { floor: Mesh[]; wall: Mesh[] } = { floor: [], wall: [] };
 
     for (let x = 0; x < map.width; x++) {
       for (let z = 0; z < map.height; z++) {
@@ -350,7 +391,7 @@ export class BabylonRenderer {
         const wallPosY = isWall ? (z <= 1 ? 0.5 : (z === 11 ? 1.2 : 1.5)) : -0.1;
 
         const tileMesh = MeshBuilder.CreateBox(
-          `d_tile_${x}_${z}`,
+          `d_tile_temp_${x}_${z}`,
           {
             width: 1.0,
             depth: 1.0,
@@ -360,9 +401,31 @@ export class BabylonRenderer {
         );
 
         tileMesh.position.set(x + 0.5, wallPosY, z + 0.5);
-        tileMesh.material = isWall ? wallMat : floorMat;
-        tileMesh.parent = this.dungeonRoot;
+
+        if (isWall) {
+          dungeonGroups.wall.push(tileMesh);
+        } else {
+          dungeonGroups.floor.push(tileMesh);
+        }
       }
+    }
+
+    const mergedFloor = Mesh.MergeMeshes(dungeonGroups.floor, true, true, undefined, false, false);
+    if (mergedFloor) {
+      mergedFloor.name = 'merged_dungeon_floor';
+      mergedFloor.material = floorMat;
+      mergedFloor.parent = this.dungeonRoot;
+      mergedFloor.freezeWorldMatrix();
+      mergedFloor.cullingStrategy = AbstractMesh.CULLINGSTRATEGY_BOUNDINGSPHERE_ONLY;
+    }
+
+    const mergedWall = Mesh.MergeMeshes(dungeonGroups.wall, true, true, undefined, false, false);
+    if (mergedWall) {
+      mergedWall.name = 'merged_dungeon_wall';
+      mergedWall.material = wallMat;
+      mergedWall.parent = this.dungeonRoot;
+      mergedWall.freezeWorldMatrix();
+      mergedWall.cullingStrategy = AbstractMesh.CULLINGSTRATEGY_BOUNDINGSPHERE_ONLY;
     }
 
     // Dungeon Props
@@ -386,6 +449,11 @@ export class BabylonRenderer {
         node.position.x = prop.x;
         node.position.z = prop.z;
         node.parent = this.dungeonRoot;
+        node.computeWorldMatrix(true);
+        node.getChildMeshes().forEach((m) => {
+          m.freezeWorldMatrix();
+          m.cullingStrategy = AbstractMesh.CULLINGSTRATEGY_BOUNDINGSPHERE_ONLY;
+        });
       }
     });
 
@@ -398,6 +466,11 @@ export class BabylonRenderer {
     const arenaRune = createBossArenaRuneMesh(this.scene);
     arenaRune.position.set(DUNGEON_BOSS_SPAWN_POS.x, 0, DUNGEON_BOSS_SPAWN_POS.z);
     arenaRune.parent = this.dungeonRoot;
+    arenaRune.computeWorldMatrix(true);
+    arenaRune.getChildMeshes().forEach((m) => {
+      m.freezeWorldMatrix();
+      m.cullingStrategy = AbstractMesh.CULLINGSTRATEGY_BOUNDINGSPHERE_ONLY;
+    });
   }
 
   // --- VIEW LAYER SYNC: READ STATE EACH FRAME ---
@@ -632,10 +705,10 @@ export class BabylonRenderer {
       }
     }
 
-    // 9. Update Water ripples in Overworld
-    const time = performance.now() * 0.002;
-    for (let i = 0; i < this.waterTiles.length; i++) {
-      this.waterTiles[i].position.y = -0.15 + Math.sin(time + i * 0.4) * 0.03;
+    // 9. Update Water ripples in Overworld (single merged mesh bob)
+    if (this.mergedWaterMesh && !isDungeon) {
+      const time = performance.now() * 0.002;
+      this.mergedWaterMesh.position.y = Math.sin(time) * 0.03;
     }
 
     // 10. Update Active Particles

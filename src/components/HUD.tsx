@@ -17,6 +17,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { Minimap } from './Minimap';
+import { FpsCounter } from './FpsCounter';
 import { isFullscreenActive, toggleFullscreen } from '@/utils/fullscreen';
 
 export const HUD: React.FC = () => {
@@ -173,8 +174,10 @@ export const HUD: React.FC = () => {
             </div>
           )}
 
-          {/* Right: Expand Button, Fullscreen Toggle, and Minimap */}
+          {/* Right: FPS Counter, Expand Button, Fullscreen Toggle, and Minimap */}
           <div className="flex items-center gap-2">
+            <FpsCounter />
+
             <button
               data-interactive="true"
               onClick={() => setIsHeaderCollapsed(false)}
@@ -261,12 +264,15 @@ export const HUD: React.FC = () => {
           <div className="flex items-start gap-2.5 sm:gap-3">
             {/* Action & Menu Button Column */}
             <div className="flex flex-col items-end gap-1.5 sm:gap-2">
-              {/* Current Area Badge */}
-              <div className="bg-black/75 backdrop-blur-md px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl border border-white/10 shadow-lg flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-[10px] sm:text-xs font-semibold tracking-wide text-zinc-200">
-                  {currentAreaName}
-                </span>
+              {/* Top Row: Current Area Badge & FPS Monitor */}
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <FpsCounter />
+                <div className="bg-black/75 backdrop-blur-md px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl border border-white/10 shadow-lg flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-[10px] sm:text-xs font-semibold tracking-wide text-zinc-200">
+                    {currentAreaName}
+                  </span>
+                </div>
               </div>
 
               {/* Quick Button Row */}

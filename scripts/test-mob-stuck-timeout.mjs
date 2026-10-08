@@ -5,17 +5,8 @@ async function run() {
   console.log('=== STARTING MOB PATHFINDING, STUCK TIMEOUT & BOSS ATTACK VERIFICATION ===\n');
 
   const browser = await puppeteer.launch({
-    executablePath: '/usr/bin/google-chrome',
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--enable-unsafe-swiftshader',
-      '--use-gl=angle',
-      '--use-angle=swiftshader',
-      '--no-zygote',
-    ],
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--use-gl=angle', '--use-angle=swiftshader'],
   });
 
   const page = await browser.newPage();
@@ -27,9 +18,15 @@ async function run() {
     }
   });
 
-  await page.goto('http://localhost:3005', { waitUntil: 'networkidle0', timeout: 30000 });
-  await page.waitForSelector('button');
-  await page.click('button');
+  await page.goto('http://localhost:3005', { waitUntil: 'networkidle2', timeout: 30000 });
+  await page.waitForSelector('#start-adventure-btn');
+  await page.click('#start-adventure-btn');
+  await page.evaluate(() => {
+    const store = window.__gameStore;
+    if (store && store.getState().gameState !== 'playing') {
+      store.getState().startGame();
+    }
+  });
   await new Promise((r) => setTimeout(r, 1200));
 
   // --- TEST 1: INTELLIGENT A* WAYPOINT PATHFINDING AROUND TREE ---
@@ -46,6 +43,7 @@ async function run() {
               x: 26.0,
               z: 1.5,
               state: 'chase',
+              chaseTimer: 4.5,
               hitstunTimer: 0,
               vx: 0,
               vz: 0,
