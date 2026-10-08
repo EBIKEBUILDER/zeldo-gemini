@@ -33,12 +33,16 @@ async function run() {
     }
   });
 
-  // Wait 1000ms for Babylon scene to stabilize and render frames
-  await new Promise((r) => setTimeout(r, 1000));
+  // Wait 1500ms for Babylon scene to stabilize and sample telemetry
+  await new Promise((r) => setTimeout(r, 1500));
 
-  // --- TEST 1: FPS Counter Visibility & Contents ---
-  console.log('Test 1: Verifying FPS counter is visible during gameplay...');
+  // --- TEST 1: FPS Counter & Performance Stats Visibility ---
+  console.log('Test 1: Verifying FPS counter and performance metrics are visible...');
   await page.waitForSelector('[data-testid="fps-counter"]', { timeout: 5000 });
+  await page.waitForFunction(() => {
+    const el = document.querySelector('[data-testid="fps-counter"]');
+    return el && !el.textContent.includes('0 DC');
+  }, { timeout: 5000 });
 
   const fpsText = await page.$eval('[data-testid="fps-counter"]', (el) => el.textContent);
   console.log('FPS Counter text content:', fpsText);
@@ -46,7 +50,31 @@ async function run() {
   if (!fpsText.includes('FPS')) {
     throw new Error(`FAIL: FPS counter does not contain 'FPS'! Content: ${fpsText}`);
   }
-  console.log('PASS: FPS Counter is visible and active on screen!\n');
+  if (!fpsText.includes('DC')) {
+    throw new Error(`FAIL: FPS counter does not contain 'DC' (Draw Calls)! Content: ${fpsText}`);
+  }
+  if (!fpsText.includes('ms')) {
+    throw new Error(`FAIL: FPS counter does not contain 'ms' (Frame Time)! Content: ${fpsText}`);
+  }
+  console.log('PASS: FPS Counter is visible and actively showing FPS, Draw Calls, and Frame Time!\n');
+
+  // --- TEST 1B: Interactive Telemetry Popover ---
+  console.log('Test 1B: Verifying clicking FPS badge opens expanded telemetry popover...');
+  await page.click('[data-testid="fps-counter"]');
+  await new Promise((r) => setTimeout(r, 300));
+  await page.waitForSelector('[data-testid="fps-telemetry-popover"]', { timeout: 3000 });
+  const popoverText = await page.$eval('[data-testid="fps-telemetry-popover"]', (el) => el.textContent);
+  console.log('Telemetry popover text:', popoverText);
+  if (!popoverText.includes('Engine Telemetry') || !popoverText.includes('Triangles')) {
+    throw new Error('FAIL: Telemetry popover missing required metrics!');
+  }
+  await page.click('[data-testid="close-telemetry-btn"]');
+  await new Promise((r) => setTimeout(r, 300));
+  const isPopoverClosed = (await page.$('[data-testid="fps-telemetry-popover"]')) === null;
+  if (!isPopoverClosed) {
+    throw new Error('FAIL: Telemetry popover failed to close!');
+  }
+  console.log('PASS: Interactive Telemetry popover opens and closes cleanly!\n');
 
   // --- TEST 2: Mesh Count & Draw Call Optimization ---
   console.log('Test 2: Verifying Babylon mesh merging and draw call reduction...');
@@ -60,6 +88,7 @@ async function run() {
       activeMeshesCount: scene ? scene.getActiveMeshes().length : -1,
       fps: renderer?.getFps ? renderer.getFps() : -1,
       drawCalls: renderer?.getDrawCalls ? renderer.getDrawCalls() : -1,
+      stats: renderer?.getStats ? renderer.getStats() : null,
       hasMergedOverworldGrass: scene ? !!scene.getMeshByName('merged_overworld_grass') : false,
       hasMergedOverworldDirt: scene ? !!scene.getMeshByName('merged_overworld_dirt') : false,
       hasMergedOverworldHedge: scene ? !!scene.getMeshByName('merged_overworld_hedge') : false,
@@ -70,9 +99,13 @@ async function run() {
   console.log('Scene Performance Stats:', sceneStats);
 
   // Before optimization, scene.meshes was > 1600.
-  // With mesh merging, total scene meshes should be < 300!
+  // With mesh merging, total scene meshes should be < 350!
   if (sceneStats.meshCount > 350) {
     throw new Error(`FAIL: Mesh count is still too high (${sceneStats.meshCount})! Expected < 350 after merging.`);
+  }
+
+  if (!sceneStats.stats || sceneStats.stats.triangles <= 0) {
+    throw new Error('FAIL: renderer.getStats() missing or invalid geometry stats!');
   }
 
   if (!sceneStats.hasMergedOverworldGrass || !sceneStats.hasMergedOverworldDirt) {

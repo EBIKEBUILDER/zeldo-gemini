@@ -1,6 +1,7 @@
 import {
   Engine,
   Scene,
+  SceneInstrumentation,
   UniversalCamera,
   Vector3,
   Color3,
@@ -16,6 +17,17 @@ import {
   AbstractMesh,
 } from '@babylonjs/core';
 import { Vector2D } from '@/types/game';
+
+export interface RenderStats {
+  fps: number;
+  drawCalls: number;
+  activeMeshes: number;
+  totalMeshes: number;
+  triangles: number;
+  vertices: number;
+  frameTimeMs: number;
+  memoryMB?: number;
+}
 import { useGameStore } from '../state/gameStore';
 import {
   CAMERA_OFFSET,
@@ -84,6 +96,7 @@ export class BabylonRenderer {
   private whiteFlashMat: StandardMaterial;
 
   private isDisposed: boolean = false;
+  private instrumentation: SceneInstrumentation | null = null;
 
   // Performance telemetry
   public getFps(): number {
@@ -91,7 +104,49 @@ export class BabylonRenderer {
   }
 
   public getDrawCalls(): number {
+    if (this.instrumentation && this.instrumentation.drawCallsCounter.current > 0) {
+      return this.instrumentation.drawCallsCounter.current;
+    }
     return this.scene ? this.scene.getActiveMeshes().length : 0;
+  }
+
+  public getStats(): RenderStats {
+    const fps = Math.round(this.engine.getFps() || 60);
+    const activeMeshes = this.scene ? this.scene.getActiveMeshes().length : 0;
+    const drawCalls =
+      this.instrumentation && this.instrumentation.drawCallsCounter.current > 0
+        ? this.instrumentation.drawCallsCounter.current
+        : activeMeshes;
+    const totalMeshes = this.scene ? this.scene.meshes.length : 0;
+    const indices = this.scene ? this.scene.getActiveIndices() : 0;
+    const vertices = this.scene ? this.scene.getTotalVertices() : 0;
+    const triangles = Math.round(indices / 3);
+    const frameTimeMs =
+      this.instrumentation && this.instrumentation.frameTimeCounter.current > 0
+        ? Math.round(this.instrumentation.frameTimeCounter.current * 10) / 10
+        : Math.round(this.engine.getDeltaTime() * 10) / 10;
+
+    let memoryMB: number | undefined;
+    if (
+      typeof window !== 'undefined' &&
+      (performance as unknown as { memory?: { usedJSHeapSize?: number } }).memory?.usedJSHeapSize
+    ) {
+      memoryMB = Math.round(
+        (performance as unknown as { memory: { usedJSHeapSize: number } }).memory.usedJSHeapSize /
+          (1024 * 1024)
+      );
+    }
+
+    return {
+      fps,
+      drawCalls,
+      activeMeshes,
+      totalMeshes,
+      triangles,
+      vertices,
+      frameTimeMs,
+      memoryMB,
+    };
   }
 
   constructor(canvas: HTMLCanvasElement) {
@@ -121,6 +176,9 @@ export class BabylonRenderer {
     this.scene.skipPointerMovePicking = true;
     this.scene.autoClear = true;
     this.scene.autoClearDepthAndStencil = true;
+
+    this.instrumentation = new SceneInstrumentation(this.scene);
+    this.instrumentation.captureFrameTime = true;
 
     if (typeof window !== 'undefined') {
       (window as unknown as { __scene: Scene }).__scene = this.scene;
@@ -850,6 +908,10 @@ export class BabylonRenderer {
 
   public dispose() {
     this.isDisposed = true;
+    if (this.instrumentation) {
+      this.instrumentation.dispose();
+      this.instrumentation = null;
+    }
     window.removeEventListener('resize', this.onResize);
     palette.clear();
     this.projectileMeshes.forEach((m) => m.dispose());
