@@ -1,12 +1,24 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useGameStore } from '@/game/state/gameStore';
-import { Sword, Play, Shield, Compass, Sparkles } from 'lucide-react';
+import { Sword, Play, Shield, Compass, Sparkles, Maximize, Minimize } from 'lucide-react';
+import { isFullscreenActive, toggleFullscreen } from '@/utils/fullscreen';
 
 export const TitleScreen: React.FC = () => {
   const gameState = useGameStore((state) => state.gameState);
   const startGame = useGameStore((state) => state.startGame);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const checkFullscreen = () => setIsFullscreen(isFullscreenActive());
+    document.addEventListener('fullscreenchange', checkFullscreen);
+    document.addEventListener('webkitfullscreenchange', checkFullscreen);
+    return () => {
+      document.removeEventListener('fullscreenchange', checkFullscreen);
+      document.removeEventListener('webkitfullscreenchange', checkFullscreen);
+    };
+  }, []);
 
   if (gameState !== 'title') return null;
 
@@ -43,16 +55,29 @@ export const TitleScreen: React.FC = () => {
         </p>
 
         {/* Start Game Action */}
-        <div className="flex flex-col items-center gap-3 w-full max-w-xs">
-          <button
-            onClick={startGame}
-            className="w-full group flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-zinc-950 font-black text-lg sm:text-xl rounded-2xl shadow-[0_0_25px_rgba(245,158,11,0.4)] hover:shadow-[0_0_35px_rgba(245,158,11,0.6)] transform hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
-          >
-            <Play className="w-6 h-6 fill-zinc-950" />
-            <span>START ADVENTURE</span>
-          </button>
+        <div className="flex flex-col items-center gap-3 w-full max-w-sm">
+          <div className="flex items-center gap-2.5 w-full">
+            <button
+              id="start-adventure-btn"
+              data-testid="start-adventure-btn"
+              onClick={startGame}
+              className="flex-1 group flex items-center justify-center gap-2.5 px-6 py-4 bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-zinc-950 font-black text-base sm:text-xl rounded-2xl shadow-[0_0_25px_rgba(245,158,11,0.4)] hover:shadow-[0_0_35px_rgba(245,158,11,0.6)] transform hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
+            >
+              <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-zinc-950" />
+              <span>START ADVENTURE</span>
+            </button>
+
+            <button
+              onClick={() => toggleFullscreen()}
+              className="p-4 bg-zinc-900/90 hover:bg-zinc-800 border border-amber-500/40 hover:border-amber-400 text-amber-300 rounded-2xl shadow-lg transition-all cursor-pointer transform active:scale-95 flex items-center justify-center shrink-0"
+              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Mobile Fullscreen'}
+            >
+              {isFullscreen ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}
+            </button>
+          </div>
+
           <span className="text-xs text-zinc-400 font-medium">
-            Press <kbd className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-200 font-mono">ENTER</kbd>, Click, or Tap to begin
+            Press <kbd className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-200 font-mono">ENTER</kbd>, Click, or Tap &bull; Fullscreen button hides browser bar
           </span>
         </div>
 

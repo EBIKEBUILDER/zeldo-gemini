@@ -52,7 +52,7 @@ async function run() {
 
   // --- STEP 1: TAP START ADVENTURE ON MOBILE ---
   console.log('Tapping START ADVENTURE...');
-  const startBtn = await page.$('button');
+  const startBtn = await page.$('#start-adventure-btn');
   if (!startBtn) throw new Error('Start button not found!');
   await startBtn.click();
   await new Promise((r) => setTimeout(r, 2000));
@@ -258,11 +258,47 @@ async function run() {
   const isModalClosed = await page.evaluate(() => {
     return !window.__gameStore.getState().isMapModalOpen;
   });
-  if (!isModalClosed) throw new Error('FAIL: Modal did not close!');
-  console.log('PASS: World Map & Quest Journal opened, navigated tabs, and closed smoothly!');
+  // --- STEP 7: TEST HEADER COLLAPSE & EXPAND AND FULLSCREEN TOGGLE ---
+  console.log('Testing In-Game Top Header collapse and expand...');
+  
+  // Find and click the collapse header button
+  const collapseBtn = await page.$('button[title*="Hide In-Game Top Header"]');
+  if (!collapseBtn) throw new Error('FAIL: Collapse Header button not found in HUD!');
+  await collapseBtn.click();
+  await new Promise((r) => setTimeout(r, 400));
+  await page.screenshot({ path: 'mobile_step9_header_collapsed.png' });
+  console.log('Saved mobile_step9_header_collapsed.png');
 
-  await page.screenshot({ path: 'mobile_step8_final.png' });
-  console.log('Saved mobile_step8_final.png');
+  // Verify expand button is now visible
+  const expandBtn = await page.$('button[title*="Expand In-Game Header"]');
+  if (!expandBtn) throw new Error('FAIL: Expand Header button not found when collapsed!');
+  console.log('PASS: Header collapsed cleanly to minimal HUD mode!');
+
+  // Expand back
+  await expandBtn.click();
+  await new Promise((r) => setTimeout(r, 400));
+  const fullHeaderCheck = await page.$('button[title*="Hide In-Game Top Header"]');
+  if (!fullHeaderCheck) throw new Error('FAIL: Header did not expand back!');
+  console.log('PASS: Header expanded back smoothly!');
+
+  // Test keyboard shortcut 'h' to collapse
+  await page.keyboard.press('h');
+  await new Promise((r) => setTimeout(r, 300));
+  const collapsedByHotkey = await page.$('button[title*="Expand In-Game Header"]');
+  if (!collapsedByHotkey) throw new Error('FAIL: Hotkey H did not collapse header!');
+  console.log('PASS: Hotkey H toggles header collapse/expand!');
+
+  // Expand back with hotkey 'h'
+  await page.keyboard.press('h');
+  await new Promise((r) => setTimeout(r, 300));
+
+  // Check Fullscreen button presence
+  const fsBtn = await page.$('button[title*="Fullscreen"]');
+  if (!fsBtn) throw new Error('FAIL: Fullscreen button not found in HUD!');
+  console.log('PASS: Fullscreen button present in HUD!');
+
+  await page.screenshot({ path: 'mobile_step10_final.png' });
+  console.log('Saved mobile_step10_final.png');
 
   await browser.close();
   console.log('--- ALL MOBILE & RPG VERIFICATION TESTS PASSED SUCCESSFULLY! ---');

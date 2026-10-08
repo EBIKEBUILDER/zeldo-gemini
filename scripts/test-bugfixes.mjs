@@ -27,13 +27,14 @@ async function run() {
     }
   });
 
-  await page.goto('http://localhost:3005', { waitUntil: 'networkidle0', timeout: 30000 });
-  await page.waitForSelector('button');
-
+  await page.goto('http://localhost:3000', { waitUntil: 'networkidle0', timeout: 30000 });
+  await page.waitForSelector('#start-adventure-btn');
   // 1. Click Start Adventure
-  await page.click('button');
+  await page.click('#start-adventure-btn');
   await new Promise((r) => setTimeout(r, 2000));
 
+  const gs = await page.evaluate(() => window.__gameStore?.getState()?.gameState);
+  console.log('Current gameState after click:', gs);
   // --- TEST 1: MOUSE CLICK SWORD ATTACK ---
   console.log('Testing Test 1: Mouse click on canvas triggers sword swing...');
   const initialAttacking = await page.evaluate(() => {
@@ -117,6 +118,8 @@ async function run() {
     const pickupsAfterFull = store.getState().pickups;
     const heartStillThere = pickupsAfterFull.some((p) => p.id === testHeartId && !p.collected);
 
+    console.log('[DEBUG Test 3] pickupsAfterFull count:', pickupsAfterFull.length, 'testHeart:', pickupsAfterFull.find(p => p.id === testHeartId));
+    console.log('[DEBUG Test 3] player before damage:', store.getState().player.health);
     // B. Now damage player (reduce HP to 4/6) and test pickup
     store.setState((prev) => ({
       player: { ...prev.player, health: 4 },
@@ -126,6 +129,8 @@ async function run() {
     await new Promise((r) => setTimeout(r, 250));
 
     const stateAfterDamage = store.getState();
+    console.log('[DEBUG Test 3] player after damage:', stateAfterDamage.player.health);
+    console.log('[DEBUG Test 3] stateAfterDamage pickups count:', stateAfterDamage.pickups.length, 'testHeart:', stateAfterDamage.pickups.find(p => p.id === testHeartId));
     const heartCollected = !stateAfterDamage.pickups.some((p) => p.id === testHeartId);
     const playerHealed = stateAfterDamage.player.health === 6;
 
@@ -151,6 +156,7 @@ async function run() {
 
     await new Promise((r) => setTimeout(r, 250));
     const stateAfterRupee = store.getState();
+    console.log('[DEBUG Test 3] stateAfterRupee pickups count:', stateAfterRupee.pickups.length, 'testRupee:', stateAfterRupee.pickups.find(p => p.id === testRupeeId));
     const rupeeCollected = !stateAfterRupee.pickups.some((p) => p.id === testRupeeId);
     const rupeeCountIncreased = stateAfterRupee.stats.rupees === initialRupees + 1;
 
