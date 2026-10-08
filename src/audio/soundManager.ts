@@ -205,6 +205,94 @@ class SoundManager {
     osc.stop(now + 0.23);
   }
 
+  // 4c. Boss Telegraph Charge: mystical ascending hum & sinister vibrato
+  public playBossCharge() {
+    this.initContext();
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(14, now);
+    lfoGain.gain.setValueAtTime(25, now);
+    lfo.connect(osc.frequency);
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(140, now);
+    osc.frequency.exponentialRampToValueAtTime(480, now + 0.55);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(400, now);
+    filter.frequency.linearRampToValueAtTime(1200, now + 0.55);
+
+    gain.gain.setValueAtTime(0.01, now);
+    gain.gain.linearRampToValueAtTime(0.28, now + 0.45);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.58);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+
+    lfo.start(now);
+    osc.start(now);
+    lfo.stop(now + 0.6);
+    osc.stop(now + 0.6);
+  }
+
+  // 4d. Boss Projectile Ricochet: resonant woody / stone bounce
+  public playBossRicochet() {
+    this.initContext();
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(520, now);
+    osc.frequency.exponentialRampToValueAtTime(260, now + 0.12);
+
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(now);
+    osc.stop(now + 0.13);
+    this.playNoiseBurst(0.06, 1200, 400, 0.2);
+  }
+
+  // 4e. Player Deflect / Reflect Thorn: crisp crystal chime
+  public playBossReflect() {
+    this.initContext();
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    const now = this.ctx.currentTime;
+    const notes = [659.25, 1046.5]; // E5, C6
+    notes.forEach((freq, idx) => {
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.04);
+
+      gain.gain.setValueAtTime(0.35, now + idx * 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.04 + 0.2);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain!);
+
+      osc.start(now + idx * 0.04);
+      osc.stop(now + idx * 0.04 + 0.22);
+    });
+  }
+
   // 5. Player Hurt: impactful thump
   public playPlayerHurt() {
     this.initContext();

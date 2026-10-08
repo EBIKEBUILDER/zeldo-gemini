@@ -58,7 +58,7 @@ export interface EnemyState {
   maxHp: number;
   speed: number;
   damage: number;
-  state: 'idle' | 'chase' | 'charge' | 'hurt' | 'dead';
+  state: 'idle' | 'chase' | 'charge' | 'hurt' | 'dead' | 'returning';
   facingAngle: number;
   hitstunTimer: number;
   hitFlashTimer: number;
@@ -76,6 +76,11 @@ export interface EnemyState {
   castTimer?: number;
   steeringBias?: number;
   chaseTimer?: number;
+  stuckTimer?: number;
+  stuckSampleTimer?: number;
+  lastSamplePos?: Vector2D;
+  pathWaypoints?: Vector2D[];
+  pathUpdateTimer?: number;
 }
 
 export interface ProjectileState {
@@ -91,6 +96,8 @@ export interface ProjectileState {
   source: 'boss' | 'player' | 'enemy';
   color?: string;
   mapId: MapId;
+  bounces?: number;
+  maxBounces?: number;
 }
 
 export type BreakableType = 'grass' | 'pot';

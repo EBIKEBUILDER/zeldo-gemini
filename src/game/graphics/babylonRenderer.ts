@@ -481,6 +481,17 @@ export class BabylonRenderer {
 
         // Hit flash
         meshes.body.material = enemy.hitFlashTimer > 0 ? this.whiteFlashMat : meshes.defaultMat;
+
+        // Boss telegraphed ranged attack ring
+        if (meshes.telegraphRing) {
+          const isTelegraphing = !!(enemy.castTimer && enemy.castTimer > 0);
+          meshes.telegraphRing.setEnabled(isTelegraphing);
+          if (isTelegraphing) {
+            const pulse = 1.0 + Math.sin(performance.now() * 0.025) * 0.18;
+            meshes.telegraphRing.scaling.set(pulse, 1.0, pulse);
+            meshes.telegraphRing.rotation.y += 0.08;
+          }
+        }
       }
     });
 

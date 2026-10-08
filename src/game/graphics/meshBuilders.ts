@@ -170,6 +170,7 @@ export interface EnemyMeshes {
   body: Mesh;
   eyes: Mesh[];
   crown?: Mesh;
+  telegraphRing?: Mesh;
   defaultMat: StandardMaterial;
 }
 
@@ -191,10 +192,18 @@ export function createEnemyMesh(
     new Color3(0.8, 0.6, 0.1)
   );
   const goldMat = palette.get(scene, 'gold_metal', new Color3(0.95, 0.78, 0.2));
+  const telegraphMat = palette.get(
+    scene,
+    'boss_telegraph_ring_mat',
+    new Color3(0.3, 0.9, 0.2),
+    new Color3(0.6, 1.0, 0.4),
+    new Color3(0.4, 0.9, 0.3)
+  );
 
   let body: Mesh;
   let eyes: Mesh[] = [];
   let crown: Mesh | undefined;
+  let telegraphRing: Mesh | undefined;
   let defaultMat: StandardMaterial;
 
   if (type === 'boss_gorgoth') {
@@ -230,6 +239,16 @@ export function createEnemyMesh(
     crown.material = goldMat;
     crown.position.set(0, 1.85, 0);
     crown.parent = root;
+
+    telegraphRing = MeshBuilder.CreateTorus('boss_telegraph_ring', {
+      diameter: 3.0,
+      thickness: 0.12,
+      tessellation: 28,
+    }, scene);
+    telegraphRing.material = telegraphMat;
+    telegraphRing.position.set(0, 0.08, 0);
+    telegraphRing.parent = root;
+    telegraphRing.setEnabled(false);
   } else {
     defaultMat = type === 'slime_red' ? redMat : greenMat;
     body = MeshBuilder.CreateIcoSphere('slime_body', {
@@ -255,7 +274,7 @@ export function createEnemyMesh(
     eyes.push(eyeR);
   }
 
-  return { root, body, eyes, crown, defaultMat };
+  return { root, body, eyes, crown, telegraphRing, defaultMat };
 }
 
 // 3. BREAKABLE MESH BUILDERS

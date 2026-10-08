@@ -155,7 +155,7 @@ async function testMobPersistence() {
   });
 
   console.log('Elusion timeout result:', timeoutResult);
-  if (timeoutResult.finalState !== 'idle') {
+  if (timeoutResult.finalState !== 'idle' && timeoutResult.finalState !== 'returning') {
     throw new Error('FAIL: Slime did not give up chase after being eluded for extended duration!');
   }
   console.log('PASS: Slime gave up chase after being completely eluded for extended duration!\n');

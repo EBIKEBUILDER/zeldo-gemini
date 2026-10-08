@@ -29,6 +29,7 @@ import {
   hasLineOfSight,
   resolveSmartSteering,
 } from './physics';
+import { findPath } from './pathfinding';
 import { useGameStore } from '../state/gameStore';
 import { soundManager } from '@/audio/soundManager';
 import { ParticleState, Vector2D, ProjectileState } from '@/types/game';
@@ -536,9 +537,9 @@ class GameLoop {
         }
       });
 
-      // Check hits against projectiles (Deflect/slice bramble thorns!)
+      // Check hits against projectiles (Deflect/slice bramble thorns back at boss!)
       projectiles.forEach((proj) => {
-        if (proj.mapId === store.currentMap && proj.life > 0) {
+        if (proj.mapId === store.currentMap && proj.life > 0 && proj.source !== 'player') {
           if (
             isInsideSwordSweep(
               player.x,
@@ -547,23 +548,31 @@ class GameLoop {
               proj.x,
               proj.z,
               proj.radius,
-              1.2
+              1.25
             )
           ) {
-            proj.life = 0;
-            soundManager.playSwordHit();
-            for (let i = 0; i < 5; i++) {
+            // Deflect thorn towards boss or reverse direction
+            soundManager.playBossReflect();
+            proj.source = 'player';
+            proj.color = '#38bdf8';
+            proj.vx = -proj.vx * 1.25;
+            proj.vz = -proj.vz * 1.25;
+            proj.life = 2.5;
+            proj.bounces = 0; // directly targets enemies
+
+            // Sparkle deflection particles
+            for (let i = 0; i < 7; i++) {
               activeParticles.push({
-                id: `proj_slice_${Date.now()}_${Math.random()}`,
-                type: 'leaf',
+                id: `proj_deflect_${Date.now()}_${Math.random()}`,
+                type: 'spark',
                 x: proj.x,
                 y: 0.6,
                 z: proj.z,
-                vx: (Math.random() - 0.5) * 4.0,
+                vx: (Math.random() - 0.5) * 4.5,
                 vy: 1.5 + Math.random() * 2.5,
-                vz: (Math.random() - 0.5) * 4.0,
+                vz: (Math.random() - 0.5) * 4.5,
                 size: 0.12,
-                color: '#7bc637',
+                color: '#38bdf8',
                 life: 0.35,
                 maxLife: 0.35,
               });
@@ -661,6 +670,96 @@ class GameLoop {
         enemy.chaseTimer = 0;
       }
 
+      // Check if enemy in 'returning' state should re-engage
+      if (enemy.state === 'returning') {
+        if (
+          (!isPlayerInSpawnSafeZone && canBossAggro && distToPlayer < 1.0) ||
+          enemy.hitFlashTimer > 0 ||
+          enemy.hitstunTimer > 0
+        ) {
+          enemy.state = 'chase';
+          enemy.stuckTimer = 0;
+          enemy.chaseTimer = maxPursuitDuration;
+        } else {
+          // Returning to original spawn point
+          const distToSpawn = Math.hypot(enemy.x - enemy.spawnX, enemy.z - enemy.spawnZ);
+          if (distToSpawn <= 0.6) {
+            enemy.state = 'idle';
+            enemy.stuckTimer = 0;
+            enemy.chaseTimer = 0;
+            enemy.pathWaypoints = undefined;
+            enemy.x = enemy.spawnX;
+            enemy.z = enemy.spawnZ;
+          } else {
+            enemy.hopCycle += dt * (isBoss ? 3.0 : 4.5);
+            const returnSpeed = enemy.speed * 0.75 * (0.8 + 0.4 * Math.max(0, Math.sin(enemy.hopCycle)));
+
+            const hasLoSToSpawn = hasLineOfSight(
+              enemy.x,
+              enemy.z,
+              enemy.spawnX,
+              enemy.spawnZ,
+              enemy.radius,
+              currentMapData,
+              quest.dungeonGateOpen,
+              store.currentMap,
+              breakables
+            );
+
+            let navTargetX = enemy.spawnX;
+            let navTargetZ = enemy.spawnZ;
+
+            if (!hasLoSToSpawn) {
+              if (!enemy.pathWaypoints || enemy.pathWaypoints.length === 0 || (enemy.pathUpdateTimer && enemy.pathUpdateTimer <= 0)) {
+                enemy.pathWaypoints = findPath(
+                  enemy.x,
+                  enemy.z,
+                  enemy.spawnX,
+                  enemy.spawnZ,
+                  enemy.radius,
+                  currentMapData,
+                  quest.dungeonGateOpen,
+                  store.currentMap,
+                  breakables
+                ) || undefined;
+                enemy.pathUpdateTimer = 0.5;
+              }
+              if (enemy.pathUpdateTimer !== undefined) enemy.pathUpdateTimer -= dt;
+
+              if (enemy.pathWaypoints && enemy.pathWaypoints.length > 0) {
+                if (Math.hypot(enemy.x - enemy.pathWaypoints[0].x, enemy.z - enemy.pathWaypoints[0].z) < 0.5 && enemy.pathWaypoints.length > 1) {
+                  enemy.pathWaypoints.shift();
+                }
+                navTargetX = enemy.pathWaypoints[0].x;
+                navTargetZ = enemy.pathWaypoints[0].z;
+              }
+            } else {
+              enemy.pathWaypoints = undefined;
+            }
+
+            const steer = resolveSmartSteering(
+              enemy.x,
+              enemy.z,
+              navTargetX,
+              navTargetZ,
+              returnSpeed,
+              dt,
+              enemy.radius,
+              currentMapData,
+              quest.dungeonGateOpen,
+              store.currentMap,
+              enemy.steeringBias || 1,
+              breakables
+            );
+            enemy.x = steer.x;
+            enemy.z = steer.z;
+            enemy.facingAngle = steer.facingAngle;
+            enemy.steeringBias = steer.chosenBias;
+          }
+          return;
+        }
+      }
+
       // Determine active chase:
       let shouldChase = false;
       if (!isPlayerInSpawnSafeZone && canBossAggro) {
@@ -679,7 +778,7 @@ class GameLoop {
           if (distToPlayer < leashRadius && (enemy.chaseTimer > 0 || isBoss)) {
             shouldChase = true;
           }
-        } else {
+        } else if (enemy.state === 'idle') {
           // In idle: initiate pursuit when player enters aggro radius
           if (distToPlayer < aggroRadius) {
             shouldChase = true;
@@ -691,6 +790,66 @@ class GameLoop {
       if (shouldChase) {
         // Aggro & Chase!
         enemy.state = 'chase';
+
+        // Check line of sight and waypoints upfront
+        const hasClearLoS = hasLineOfSight(
+          enemy.x,
+          enemy.z,
+          player.x,
+          player.z,
+          enemy.radius,
+          currentMapData,
+          quest.dungeonGateOpen,
+          store.currentMap,
+          breakables
+        );
+
+        if (!hasClearLoS) {
+          if (!enemy.pathWaypoints || enemy.pathWaypoints.length === 0 || (enemy.pathUpdateTimer && enemy.pathUpdateTimer <= 0)) {
+            enemy.pathWaypoints = findPath(
+              enemy.x,
+              enemy.z,
+              player.x,
+              player.z,
+              enemy.radius,
+              currentMapData,
+              quest.dungeonGateOpen,
+              store.currentMap,
+              breakables
+            ) || undefined;
+            enemy.pathUpdateTimer = 0.4;
+          }
+        } else {
+          enemy.pathWaypoints = undefined;
+        }
+
+        // Sample movement progress to detect if completely stuck without movement towards player
+        if (!enemy.lastSamplePos) {
+          enemy.lastSamplePos = { x: enemy.x, z: enemy.z };
+        }
+        enemy.stuckSampleTimer = (enemy.stuckSampleTimer || 0) + dt;
+        if (enemy.stuckSampleTimer >= 0.25) {
+          const distMoved = Math.hypot(enemy.x - enemy.lastSamplePos.x, enemy.z - enemy.lastSamplePos.z);
+          enemy.lastSamplePos = { x: enemy.x, z: enemy.z };
+          enemy.stuckSampleTimer = 0;
+          const isPhysicallyStuck = distMoved < 0.04;
+          const isPathUnreachable = !hasClearLoS && (!enemy.pathWaypoints || enemy.pathWaypoints.length === 0);
+
+          if (isPhysicallyStuck || isPathUnreachable) {
+            enemy.stuckTimer = (enemy.stuckTimer || 0) + 0.25;
+          } else {
+            enemy.stuckTimer = Math.max(0, (enemy.stuckTimer || 0) - 0.25);
+          }
+        }
+
+        // If enemy is completely stuck without movement towards player for extended duration (>= 3.5s):
+        // Time out and walk back to where they started!
+        if (enemy.stuckTimer && enemy.stuckTimer >= 3.5) {
+          enemy.state = 'returning';
+          enemy.pathWaypoints = undefined;
+          enemy.chaseTimer = 0;
+          return;
+        }
 
         const isBoss = enemy.type === 'boss_gorgoth';
 
@@ -721,13 +880,28 @@ class GameLoop {
             });
           }
         } else {
-          // ALL ENEMIES (Overworld Slimes, Dungeon Mobs, and Boss) use smart steering pathfinding!
-          // Intelligently maneuvers around trees, rocks, hedges, water, pillars, and walls.
+          // ALL ENEMIES use intelligent A* waypoint pathfinding + smart obstacle steering!
+          // Maneuvers around trees, rocks, hedges, water, pillars, clay pots, and walls.
+          let navTargetX = player.x;
+          let navTargetZ = player.z;
+
+          if (enemy.pathUpdateTimer !== undefined) {
+            enemy.pathUpdateTimer -= dt;
+          }
+
+          if (enemy.pathWaypoints && enemy.pathWaypoints.length > 0) {
+            if (Math.hypot(enemy.x - enemy.pathWaypoints[0].x, enemy.z - enemy.pathWaypoints[0].z) < 0.45 && enemy.pathWaypoints.length > 1) {
+              enemy.pathWaypoints.shift();
+            }
+            navTargetX = enemy.pathWaypoints[0].x;
+            navTargetZ = enemy.pathWaypoints[0].z;
+          }
+
           const steer = resolveSmartSteering(
             enemy.x,
             enemy.z,
-            player.x,
-            player.z,
+            navTargetX,
+            navTargetZ,
             moveSpeed,
             dt,
             enemy.radius,
@@ -752,7 +926,7 @@ class GameLoop {
           if (enemy.castTimer && enemy.castTimer > 0) {
             enemy.castTimer -= dt;
             if (enemy.castTimer <= 0) {
-              // Launch bramble thorn projectile towards player
+              // Launch ricocheting bramble thorn projectile towards player
               const pDist = Math.sqrt(dx * dx + dz * dz) || 0.001;
               const pSpeed = ENEMY_SETTINGS.boss_gorgoth.projectileSpeed;
               projectiles.push({
@@ -763,11 +937,13 @@ class GameLoop {
                 vz: (dz / pDist) * pSpeed,
                 radius: ENEMY_SETTINGS.boss_gorgoth.projectileRadius,
                 damage: ENEMY_SETTINGS.boss_gorgoth.projectileDamage,
-                life: 3.5,
-                maxLife: 3.5,
+                life: 4.0,
+                maxLife: 4.0,
                 source: 'boss',
                 color: '#7bc637',
                 mapId: 'dungeon',
+                bounces: 2,
+                maxBounces: 2,
               });
               soundManager.playBossShoot();
               enemy.rangedCooldown = ENEMY_SETTINGS.boss_gorgoth.projectileCooldown + (Math.random() * 0.8 - 0.4);
@@ -784,9 +960,21 @@ class GameLoop {
               store.currentMap,
               breakables
             );
-            // Trigger ranged attack if player is keeping distance, hiding behind a pillar, or periodically
-            if (distToPlayer > 3.0 || !hasClearLoS || distToPlayer > 2.2) {
+
+            // Check if player is hiding in any room corner (boss room: x: 3..16, z: 12..22)
+            const isPlayerInCorner =
+              (player.x <= 5.5 && player.z >= 19.0) ||
+              (player.x >= 13.5 && player.z >= 19.0) ||
+              (player.x <= 5.5 && player.z <= 14.5) ||
+              (player.x >= 13.5 && player.z <= 14.5);
+
+            const isPlayerDistant = distToPlayer > 3.0;
+            const isBossStuck = (enemy.stuckTimer || 0) > 0.5;
+
+            // Trigger ranged attack if player is in corner, behind pillar, keeping distance, or periodically
+            if (isPlayerInCorner || !hasClearLoS || isPlayerDistant || isBossStuck || distToPlayer > 2.2) {
               enemy.castTimer = ENEMY_SETTINGS.boss_gorgoth.projectileWindup;
+              soundManager.playBossCharge();
             } else {
               enemy.rangedCooldown = 1.0;
             }
@@ -834,6 +1022,8 @@ class GameLoop {
         // Idle wander (gave up pursuit or out of range)
         enemy.state = 'idle';
         enemy.chaseTimer = 0;
+        enemy.stuckTimer = 0;
+        enemy.pathWaypoints = undefined;
         enemy.hopCycle += dt * 2.0;
         if (Math.sin(enemy.hopCycle) > 0.8) {
           const wanderDx = Math.sin(enemy.facingAngle) * enemy.speed * 0.4 * dt;
@@ -1090,7 +1280,58 @@ class GameLoop {
           breakables
         )
       ) {
-        // Impact particles against obstacle
+        // Boss Bramble projectile bounces off walls/pillars to flush out corner campers!
+        if (proj.bounces && proj.bounces > 0) {
+          const xBlocked = isPositionBlocked(
+            nextX,
+            proj.z,
+            proj.radius,
+            currentMapData,
+            quest.dungeonGateOpen,
+            store.currentMap,
+            breakables
+          );
+          const zBlocked = isPositionBlocked(
+            proj.x,
+            nextZ,
+            proj.radius,
+            currentMapData,
+            quest.dungeonGateOpen,
+            store.currentMap,
+            breakables
+          );
+
+          if (xBlocked) proj.vx = -proj.vx;
+          if (zBlocked) proj.vz = -proj.vz;
+          if (!xBlocked && !zBlocked) {
+            proj.vx = -proj.vx;
+            proj.vz = -proj.vz;
+          }
+          proj.bounces--;
+          soundManager.playBossRicochet();
+
+          // Ricochet burst
+          for (let i = 0; i < 4; i++) {
+            activeParticles.push({
+              id: `proj_bounce_${Date.now()}_${Math.random()}`,
+              type: 'leaf',
+              x: proj.x,
+              y: 0.5,
+              z: proj.z,
+              vx: (Math.random() - 0.5) * 2.8,
+              vy: 1.0 + Math.random() * 1.5,
+              vz: (Math.random() - 0.5) * 2.8,
+              size: 0.1,
+              color: '#a3e635',
+              life: 0.25,
+              maxLife: 0.25,
+            });
+          }
+          activeProjectiles.push(proj);
+          return;
+        }
+
+        // Impact particles against obstacle (destroyed)
         for (let i = 0; i < 4; i++) {
           activeParticles.push({
             id: `proj_splat_${Date.now()}_${Math.random()}`,
@@ -1113,17 +1354,51 @@ class GameLoop {
       proj.x = nextX;
       proj.z = nextZ;
 
-      // Check collision with Player
-      const pDx = player.x - proj.x;
-      const pDz = player.z - proj.z;
-      const pDist = Math.sqrt(pDx * pDx + pDz * pDz);
+      // Deflected Projectile Collision with Enemies
+      if (proj.source === 'player') {
+        let hitEnemy = false;
+        for (let eIdx = 0; eIdx < enemies.length; eIdx++) {
+          const e = enemies[eIdx];
+          if (e.mapId !== store.currentMap || e.isDead) continue;
+          const eDist = Math.hypot(e.x - proj.x, e.z - proj.z);
+          if (eDist < e.radius + proj.radius) {
+            e.hp = Math.max(0, e.hp - proj.damage);
+            e.hitFlashTimer = 0.25;
+            soundManager.playEnemyHurt();
 
-      if (pDist < proj.radius + PLAYER_RADIUS && player.iFrames <= 0) {
-        player.health = Math.max(0, player.health - proj.damage);
-        player.iFrames = PLAYER_IFRAMES_DURATION;
-        screenShake = 0.28;
-        damageFlash = 0.75;
-        soundManager.playPlayerHurt();
+            for (let p = 0; p < 7; p++) {
+              activeParticles.push({
+                id: `deflect_hit_${Date.now()}_${Math.random()}`,
+                type: 'spark',
+                x: e.x,
+                y: 0.6,
+                z: e.z,
+                vx: (Math.random() - 0.5) * 4.0,
+                vy: 1.5 + Math.random() * 2.0,
+                vz: (Math.random() - 0.5) * 4.0,
+                size: 0.12,
+                color: '#38bdf8',
+                life: 0.35,
+                maxLife: 0.35,
+              });
+            }
+            hitEnemy = true;
+            break;
+          }
+        }
+        if (hitEnemy) return; // Projectile consumed on hit
+      } else {
+        // Check collision with Player
+        const pDx = player.x - proj.x;
+        const pDz = player.z - proj.z;
+        const pDist = Math.sqrt(pDx * pDx + pDz * pDz);
+
+        if (pDist < proj.radius + PLAYER_RADIUS && player.iFrames <= 0) {
+          player.health = Math.max(0, player.health - proj.damage);
+          player.iFrames = PLAYER_IFRAMES_DURATION;
+          screenShake = 0.28;
+          damageFlash = 0.75;
+          soundManager.playPlayerHurt();
 
         // Player impact sparks
         for (let i = 0; i < 6; i++) {
@@ -1156,9 +1431,10 @@ class GameLoop {
 
         return; // Consumed on player hit
       }
+    }
 
-      activeProjectiles.push(proj);
-    });
+    activeProjectiles.push(proj);
+  });
 
     // --- 8. QUEST PROGRESSION & TRANSITIONS ---
     // A. Overworld -> Dungeon Entrance
