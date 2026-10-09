@@ -7,7 +7,7 @@ class SoundManager {
   private sfxGain: GainNode | null = null;
   private musicGain: GainNode | null = null;
   private currentMusicTheme: 'overworld' | 'dungeon' | 'boss' | 'none' = 'none';
-  private musicInterval: number | null = null;
+  private musicInterval: any = null;
   private musicStep: number = 0;
 
   constructor() {
@@ -806,6 +806,7 @@ class SoundManager {
     this.musicStep = 0;
 
     this.initContext();
+    if (!this.ctx || typeof window === 'undefined') return;
 
     // 16-step retro pattern sequencer
     const bpm = theme === 'boss' ? 140 : theme === 'overworld' ? 116 : 92;

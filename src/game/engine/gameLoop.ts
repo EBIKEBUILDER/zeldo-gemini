@@ -28,8 +28,15 @@ import {
   isPositionBlocked,
   hasLineOfSight,
   resolveSmartSteering,
+  lerpAngle,
 } from './physics';
-import { findPathAStar, findPath } from './pathfinding';
+import {
+  findPathAStar,
+  findPath,
+  defaultPathfindingSystem,
+  defaultNavGrid,
+  defaultPortalRegistry,
+} from './pathfinding';
 import { useGameStore } from '../state/gameStore';
 import { soundManager } from '@/audio/soundManager';
 import { ParticleState, Vector2D, ProjectileState, GroundHazardState, ContextAction } from '@/types/game';
@@ -82,23 +89,25 @@ class GameLoop {
     const store = useGameStore.getState();
     if (store.gameState !== 'playing') return;
 
-    const currentMapData = store.currentMap === 'dungeon' ? store.dungeonMap : store.overworldMap;
     const player = store.player;
 
-    const waypoints = findPath(
-      player.x,
-      player.z,
+    const result = defaultPathfindingSystem.findPathImmediate({
+      startX: player.x,
+      startZ: player.z,
+      startMap: store.currentMap,
       targetX,
       targetZ,
-      PLAYER_RADIUS,
-      currentMapData,
-      store.quest.dungeonGateOpen,
-      store.currentMap,
-      store.breakables
-    );
+      targetMap: store.currentMap,
+      radius: PLAYER_RADIUS,
+      isAI: false,
+      overworldMap: store.overworldMap,
+      dungeonMap: store.dungeonMap,
+      isGateOpen: store.quest.dungeonGateOpen,
+      breakables: store.breakables,
+    });
 
     this.tapTarget = { x: targetX, z: targetZ };
-    this.tapWaypoints = waypoints && waypoints.length > 0 ? waypoints : [{ x: targetX, z: targetZ }];
+    this.tapWaypoints = result.waypoints && result.waypoints.length > 0 ? result.waypoints : [{ x: targetX, z: targetZ }];
     useGameStore.getState().setTapTargetPos({ x: targetX, z: targetZ });
   }
 
@@ -210,7 +219,7 @@ class GameLoop {
   }
 
   // --- FIXED TIMESTEP SIMULATION TICK (60 Hz) ---
-  private fixedUpdate(dt: number) {
+  public fixedUpdate(dt: number) {
     const store = useGameStore.getState();
 
     // Only simulate gameplay while in 'playing' state
@@ -342,6 +351,7 @@ class GameLoop {
         }, 1800);
       } else if (contextAction.type === 'unlock_gate' && quest.hasDungeonKey && !quest.dungeonGateOpen) {
         quest.dungeonGateOpen = true;
+        defaultNavGrid.onGateStateChanged(true, store.dungeonMap, breakables);
         soundManager.playGateUnlock();
         banner = {
           title: 'Gate Unlocked!',
@@ -497,6 +507,7 @@ class GameLoop {
             )
           ) {
             item.isBroken = true;
+            defaultNavGrid.onBreakableStateChanged(item, currentMapData, quest.dungeonGateOpen, breakables);
 
             if (item.type === 'grass') {
               soundManager.playGrassCut();
@@ -792,6 +803,14 @@ class GameLoop {
       player.isBlinking = false;
     }
 
+    // Ensure NavGrid is built
+    if (!defaultNavGrid.isBuilt) {
+      defaultNavGrid.build(store.overworldMap, store.dungeonMap, quest.dungeonGateOpen, breakables);
+    }
+
+    // Process queued pathfinding requests with budget (max 3 searches per tick)
+    defaultPathfindingSystem.processQueue(3);
+
     // --- 5. ENEMY AI & CONTACT DAMAGE ---
     enemies.forEach((enemy) => {
       if (enemy.mapId !== store.currentMap) return;
@@ -819,6 +838,29 @@ class GameLoop {
       if (enemy.attackCooldown > 0) enemy.attackCooldown = Math.max(0, enemy.attackCooldown - dt);
       if (enemy.poiseTimer && enemy.poiseTimer > 0) enemy.poiseTimer = Math.max(0, enemy.poiseTimer - dt);
       if (enemy.rangedCooldown !== undefined && enemy.rangedCooldown > 0) enemy.rangedCooldown = Math.max(0, enemy.rangedCooldown - dt);
+
+      // Consume completed pathfinding results from budget queue
+      const pathResult = defaultPathfindingSystem.consumeResult(enemy.id);
+      if (pathResult) {
+        enemy.pathPending = false;
+        enemy.pathStatus = pathResult.status;
+        if (pathResult.status === 'unreachable') {
+          enemy.pathWaypoints = undefined;
+          enemy.aStarPath = undefined;
+          enemy.state = 'returning';
+          enemy.chaseTimer = 0;
+        } else {
+          enemy.pathWaypoints = pathResult.waypoints.length > 0 ? pathResult.waypoints : undefined;
+          enemy.aStarPath = enemy.pathWaypoints;
+        }
+      }
+
+      const returnResult = defaultPathfindingSystem.consumeResult(`${enemy.id}_return`);
+      if (returnResult) {
+        enemy.pathPending = false;
+        enemy.pathWaypoints = returnResult.waypoints.length > 0 ? returnResult.waypoints : undefined;
+        enemy.aStarPath = enemy.pathWaypoints;
+      }
 
       if (enemy.hitstunTimer > 0) {
         enemy.hitstunTimer -= dt;
@@ -896,7 +938,10 @@ class GameLoop {
             enemy.hopCycle += dt * (isBoss ? 3.0 : 4.5);
             const returnSpeed = enemy.speed * 0.75 * (0.8 + 0.4 * Math.max(0, Math.sin(enemy.hopCycle)));
 
-            const hasLoSToSpawn = hasLineOfSight(
+            const targetMap = enemy.spawnMapId || enemy.mapId;
+            const isCrossMapSpawn = enemy.mapId !== targetMap;
+
+            const hasLoSToSpawn = !isCrossMapSpawn && hasLineOfSight(
               enemy.x,
               enemy.z,
               enemy.spawnX,
@@ -908,25 +953,42 @@ class GameLoop {
               breakables
             );
 
+            // Realistic navigation: use A* pathfinding unless very close (<= 2.0 tiles) with clear line of sight
+            const hasClearDirectPath = distToSpawn <= 2.0 && hasLoSToSpawn;
+
             let navTargetX = enemy.spawnX;
             let navTargetZ = enemy.spawnZ;
 
-            if (!hasLoSToSpawn) {
-              if (!enemy.pathWaypoints || enemy.pathWaypoints.length === 0 || (enemy.pathUpdateTimer && enemy.pathUpdateTimer <= 0)) {
-                const path = findPathAStar(
-                  enemy.x,
-                  enemy.z,
-                  enemy.spawnX,
-                  enemy.spawnZ,
-                  enemy.radius,
-                  currentMapData,
-                  quest.dungeonGateOpen,
-                  store.currentMap,
-                  breakables
+            if (!hasClearDirectPath) {
+              if (
+                (!enemy.pathWaypoints || enemy.pathWaypoints.length === 0 || (enemy.pathUpdateTimer && enemy.pathUpdateTimer <= 0)) &&
+                !enemy.pathPending
+              ) {
+                enemy.pathPending = true;
+                enemy.pathUpdateTimer = 0.5 + Math.random() * 0.2;
+                defaultPathfindingSystem.requestPath(
+                  `${enemy.id}_return`,
+                  {
+                    startX: enemy.x,
+                    startZ: enemy.z,
+                    startMap: enemy.mapId,
+                    targetX: enemy.spawnX,
+                    targetZ: enemy.spawnZ,
+                    targetMap: targetMap,
+                    radius: enemy.radius,
+                    isAI: true,
+                    overworldMap: store.overworldMap,
+                    dungeonMap: store.dungeonMap,
+                    isGateOpen: quest.dungeonGateOpen,
+                    breakables,
+                  },
+                  2,
+                  (res) => {
+                    enemy.pathPending = false;
+                    enemy.pathWaypoints = res.waypoints.length > 0 ? res.waypoints : undefined;
+                    enemy.aStarPath = res.waypoints.length > 0 ? res.waypoints : undefined;
+                  }
                 );
-                enemy.pathWaypoints = path || undefined;
-                enemy.aStarPath = path || undefined;
-                enemy.pathUpdateTimer = 0.5;
               }
               if (enemy.pathUpdateTimer !== undefined) enemy.pathUpdateTimer -= dt;
 
@@ -953,6 +1015,7 @@ class GameLoop {
               }
             } else {
               enemy.pathWaypoints = undefined;
+              enemy.pathPending = false;
             }
 
             const steer = resolveSmartSteering(
@@ -967,12 +1030,26 @@ class GameLoop {
               quest.dungeonGateOpen,
               store.currentMap,
               enemy.steeringBias || 1,
-              breakables
+              breakables,
+              enemy.facingAngle
             );
+
+            const actualDx = steer.x - enemy.x;
+            const actualDz = steer.z - enemy.z;
+            const actualDist = Math.hypot(actualDx, actualDz);
+
             enemy.x = steer.x;
             enemy.z = steer.z;
-            enemy.facingAngle = steer.facingAngle;
             enemy.steeringBias = steer.chosenBias;
+
+            // Orient the monster realistically in its direction of movement - NEVER moonwalk backwards
+            if (actualDist > 0.001) {
+              const moveHeading = Math.atan2(actualDx, actualDz);
+              enemy.facingAngle = lerpAngle(enemy.facingAngle, moveHeading, 12.0 * dt);
+            } else {
+              const targetHeading = Math.atan2(navTargetX - enemy.x, navTargetZ - enemy.z);
+              enemy.facingAngle = lerpAngle(enemy.facingAngle, targetHeading, 12.0 * dt);
+            }
           }
           return;
         }
@@ -980,8 +1057,25 @@ class GameLoop {
 
       // Determine active chase:
       let shouldChase = false;
+      const isCrossMap = enemy.mapId !== store.currentMap;
+
       if (!isPlayerInSpawnSafeZone && canBossAggro) {
         if (enemy.state === 'chase') {
+          // If player transitioned to a different non-adjacent map (e.g. dungeon):
+          if (isCrossMap) {
+            const portals = defaultPortalRegistry.getPortalsFrom(enemy.mapId);
+            const canTraverse = portals.some((p) => p.toChunk === store.currentMap && p.traversableByAI);
+            if (!canTraverse) {
+              // Classic Zelda leashing: monsters give up at entrance by default!
+              enemy.state = 'returning';
+              enemy.chaseTimer = 0;
+              enemy.pathWaypoints = undefined;
+              enemy.pathPending = false;
+              enemy.stuckTimer = 0;
+              return;
+            }
+          }
+
           // Already in active pursuit:
           // If player is outside initial aggro radius, decrement pursuit persistence timer
           if (distToPlayer > aggroRadius) {
@@ -997,8 +1091,8 @@ class GameLoop {
             shouldChase = true;
           }
         } else if (enemy.state === 'idle') {
-          // In idle: initiate pursuit when player enters aggro radius
-          if (distToPlayer < aggroRadius) {
+          // In idle: initiate pursuit when player enters aggro radius in same map
+          if (!isCrossMap && distToPlayer < aggroRadius) {
             shouldChase = true;
             enemy.chaseTimer = maxPursuitDuration;
           }
@@ -1010,7 +1104,7 @@ class GameLoop {
         enemy.state = 'chase';
 
         // Check line of sight and waypoints upfront
-        const hasClearLoS = hasLineOfSight(
+        const hasClearLoS = !isCrossMap && hasLineOfSight(
           enemy.x,
           enemy.z,
           player.x,
@@ -1023,25 +1117,51 @@ class GameLoop {
         );
 
         if (!hasClearLoS) {
-          if (!enemy.pathWaypoints || enemy.pathWaypoints.length === 0 || (enemy.pathUpdateTimer && enemy.pathUpdateTimer <= 0)) {
-            const path = findPathAStar(
-              enemy.x,
-              enemy.z,
-              player.x,
-              player.z,
-              enemy.radius,
-              currentMapData,
-              quest.dungeonGateOpen,
-              store.currentMap,
-              breakables
+          if (
+            (!enemy.pathWaypoints || enemy.pathWaypoints.length === 0 || (enemy.pathUpdateTimer && enemy.pathUpdateTimer <= 0)) &&
+            !enemy.pathPending
+          ) {
+            enemy.pathPending = true;
+            enemy.pathUpdateTimer = 0.35 + Math.random() * 0.25;
+
+            defaultPathfindingSystem.requestPath(
+              enemy.id,
+              {
+                startX: enemy.x,
+                startZ: enemy.z,
+                startMap: enemy.mapId,
+                targetX: player.x,
+                targetZ: player.z,
+                targetMap: store.currentMap,
+                radius: enemy.radius,
+                isAI: true,
+                overworldMap: store.overworldMap,
+                dungeonMap: store.dungeonMap,
+                isGateOpen: quest.dungeonGateOpen,
+                breakables,
+              },
+              Math.max(1, 20 - distToPlayer),
+              (result) => {
+                enemy.pathPending = false;
+                enemy.pathStatus = result.status;
+                if (result.status === 'unreachable') {
+                  enemy.pathWaypoints = undefined;
+                  enemy.aStarPath = undefined;
+                  // Graceful no-path fallback: monster leashes back smoothly
+                  enemy.state = 'returning';
+                  enemy.chaseTimer = 0;
+                } else {
+                  enemy.pathWaypoints = result.waypoints.length > 0 ? result.waypoints : undefined;
+                  enemy.aStarPath = result.waypoints.length > 0 ? result.waypoints : undefined;
+                }
+              }
             );
-            enemy.pathWaypoints = path || undefined;
-            enemy.aStarPath = path || undefined;
-            enemy.pathUpdateTimer = 0.4;
           }
         } else {
           enemy.pathWaypoints = undefined;
           enemy.aStarPath = undefined;
+          enemy.pathPending = false;
+          enemy.pathStatus = 'complete';
         }
 
         // Sample movement progress to detect if completely stuck without movement towards player
@@ -1068,6 +1188,7 @@ class GameLoop {
         if (enemy.stuckTimer && enemy.stuckTimer >= 3.5) {
           enemy.state = 'returning';
           enemy.pathWaypoints = undefined;
+          enemy.pathPending = false;
           enemy.chaseTimer = 0;
           return;
         }
@@ -1130,6 +1251,16 @@ class GameLoop {
             }
             navTargetX = enemy.pathWaypoints[0].x;
             navTargetZ = enemy.pathWaypoints[0].z;
+          } else if (enemy.pathStatus === 'partial') {
+            // Graceful No-Path Fallback: target is blocked/behind wall, and monster is at closest reachable point.
+            // Do NOT charge into wall! Face player and hold/pace gently.
+            enemy.facingAngle = Math.atan2(dx, dz);
+            navTargetX = enemy.x;
+            navTargetZ = enemy.z;
+          }
+
+          if (enemy.steeringBiasTimer !== undefined) {
+            enemy.steeringBiasTimer -= dt;
           }
 
           const steer = resolveSmartSteering(
@@ -1144,12 +1275,25 @@ class GameLoop {
             quest.dungeonGateOpen,
             store.currentMap,
             enemy.steeringBias || 1,
-            breakables
+            breakables,
+            enemy.facingAngle
           );
+          const actualDx = steer.x - enemy.x;
+          const actualDz = steer.z - enemy.z;
+          const actualDist = Math.hypot(actualDx, actualDz);
           enemy.x = steer.x;
           enemy.z = steer.z;
-          enemy.facingAngle = steer.facingAngle;
-          enemy.steeringBias = steer.chosenBias;
+          if (enemy.pathStatus === 'partial') {
+            enemy.facingAngle = Math.atan2(dx, dz);
+          } else if (actualDist > 0.001) {
+            enemy.facingAngle = steer.facingAngle;
+          } else {
+            enemy.facingAngle = Math.atan2(navTargetX - enemy.x, navTargetZ - enemy.z);
+          }
+          if (!enemy.steeringBiasTimer || enemy.steeringBiasTimer <= 0) {
+            enemy.steeringBias = steer.chosenBias;
+            enemy.steeringBiasTimer = 0.35;
+          }
         }
 
         // 2. Boss Dynamic Multi-Phase Ranged & Area Attacks (Mario RPG Style Encounter)
@@ -1327,33 +1471,47 @@ class GameLoop {
           }
         }
       } else {
-        // Idle wander (gave up pursuit or out of range)
-        enemy.state = 'idle';
-        enemy.chaseTimer = 0;
-        enemy.stuckTimer = 0;
-        enemy.pathWaypoints = undefined;
-        enemy.hopCycle += dt * 2.0;
-        if (Math.sin(enemy.hopCycle) > 0.8) {
-          const wanderDx = Math.sin(enemy.facingAngle) * enemy.speed * 0.4 * dt;
-          const wanderDz = Math.cos(enemy.facingAngle) * enemy.speed * 0.4 * dt;
-          const resolved = resolveWallSliding(
-            enemy.x,
-            enemy.z,
-            wanderDx,
-            wanderDz,
-            enemy.radius,
-            currentMapData,
-            quest.dungeonGateOpen,
-            store.currentMap
-          );
-          if (Math.hypot(resolved.x - enemy.x, resolved.z - enemy.z) < 0.0005) {
-            // If blocked while wandering, pick a new direction away from the obstacle
+        // Pursuit dropped or idle
+        const distToSpawn = Math.hypot(enemy.x - enemy.spawnX, enemy.z - enemy.spawnZ);
+        if (enemy.state === 'chase' && distToSpawn > 0.6) {
+          // Give up pursuit and leash back to spawn point realistically using pathfinding
+          enemy.state = 'returning';
+          enemy.chaseTimer = 0;
+          enemy.stuckTimer = 0;
+          enemy.pathWaypoints = undefined;
+          enemy.pathPending = false;
+          enemy.pathUpdateTimer = 0;
+          enemy.aStarPath = undefined;
+        } else {
+          // Idle wander (at or near spawn point)
+          enemy.state = 'idle';
+          enemy.chaseTimer = 0;
+          enemy.stuckTimer = 0;
+          enemy.pathWaypoints = undefined;
+          enemy.pathPending = false;
+          enemy.hopCycle += dt * 2.0;
+          if (Math.sin(enemy.hopCycle) > 0.8) {
+            const wanderDx = Math.sin(enemy.facingAngle) * enemy.speed * 0.4 * dt;
+            const wanderDz = Math.cos(enemy.facingAngle) * enemy.speed * 0.4 * dt;
+            const resolved = resolveWallSliding(
+              enemy.x,
+              enemy.z,
+              wanderDx,
+              wanderDz,
+              enemy.radius,
+              currentMapData,
+              quest.dungeonGateOpen,
+              store.currentMap
+            );
+            if (Math.hypot(resolved.x - enemy.x, resolved.z - enemy.z) < 0.0005) {
+              // If blocked while wandering, pick a new direction away from the obstacle
+              enemy.facingAngle = Math.random() * Math.PI * 2;
+            }
+            enemy.x = resolved.x;
+            enemy.z = resolved.z;
+          } else if (Math.random() < 0.02) {
             enemy.facingAngle = Math.random() * Math.PI * 2;
           }
-          enemy.x = resolved.x;
-          enemy.z = resolved.z;
-        } else if (Math.random() < 0.02) {
-          enemy.facingAngle = Math.random() * Math.PI * 2;
         }
       }
     });
@@ -1844,6 +2002,7 @@ class GameLoop {
       );
       if (distToGate < 2.0 && quest.hasDungeonKey && !quest.dungeonGateOpen) {
         quest.dungeonGateOpen = true;
+        defaultNavGrid.onGateStateChanged(true, store.dungeonMap, breakables);
         soundManager.playGateUnlock();
         banner = {
           title: 'Gate Unlocked!',

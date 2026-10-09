@@ -31,6 +31,7 @@ import {
   DUNGEON_EXIT_POS,
 } from '../constants';
 import { soundManager } from '@/audio/soundManager';
+import { defaultNavGrid, defaultPathfindingSystem } from '../engine/pathfinding';
 
 export interface GameStoreState {
   // Navigation / screen
@@ -171,6 +172,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     soundManager.startMusic('overworld');
     const overworld = generateOverworld();
     const dungeon = generateDungeon();
+    const initialBreakables = [...overworld.initialBreakables, ...dungeon.initialBreakables];
+
+    defaultNavGrid.build(overworld, dungeon, false, initialBreakables);
+    defaultPathfindingSystem.clearQueue();
 
     set({
       gameState: 'playing',
@@ -185,7 +190,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         health: PLAYER_MAX_HEALTH,
       },
       enemies: [...overworld.initialEnemies, ...dungeon.initialEnemies],
-      breakables: [...overworld.initialBreakables, ...dungeon.initialBreakables],
+      breakables: initialBreakables,
       pickups: [...overworld.initialPickups, ...dungeon.initialPickups],
       projectiles: [],
       groundHazards: [],
@@ -215,6 +220,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   resetToTitle: () => {
     soundManager.stopMusic();
+    defaultPathfindingSystem.clearQueue();
     set({
       gameState: 'title',
       banner: null,

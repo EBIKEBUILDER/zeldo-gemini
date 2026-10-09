@@ -261,11 +261,10 @@ export function createEnemyMesh(
   if (type === 'boss_gorgoth') {
     defaultMat = bossMat;
 
-    // 1. Chunky faceted body (Mario RPG Boss presence)
-    body = MeshBuilder.CreateIcoSphere('boss_body', {
-      radius: 1.15,
-      subdivisions: 2,
-      flat: true,
+    // 1. Smooth rounded body (Mario RPG Boss presence)
+    body = MeshBuilder.CreateSphere('boss_body', {
+      diameter: 2.3,
+      segments: 24,
     }, scene);
     body.material = bossMat;
     body.scaling.set(1.15, 0.88, 1.15);
@@ -280,7 +279,7 @@ export function createEnemyMesh(
       diameterTop: 0.55,
       diameterBottom: 0.2,
       height: 0.5,
-      tessellation: 5,
+      tessellation: 16,
     }, scene);
     pauldronMeshL.material = woodPauldronMat;
     pauldronMeshL.rotation.z = -0.55;
@@ -294,18 +293,17 @@ export function createEnemyMesh(
       diameterTop: 0.55,
       diameterBottom: 0.2,
       height: 0.5,
-      tessellation: 5,
+      tessellation: 16,
     }, scene);
     pauldronMeshR.material = woodPauldronMat;
     pauldronMeshR.rotation.z = 0.55;
     pauldronMeshR.parent = pauldronR;
     pauldrons.push(pauldronR);
 
-    // 3. Glowing Bramble Core Gem in chest
-    coreGem = MeshBuilder.CreateIcoSphere('boss_core_gem', {
-      radius: 0.26,
-      subdivisions: 1,
-      flat: true,
+    // 3. Glowing Bramble Core Gem in chest (smooth glowing gem)
+    coreGem = MeshBuilder.CreateSphere('boss_core_gem', {
+      diameter: 0.52,
+      segments: 16,
     }, scene);
     coreGem.material = coreGemMat;
     coreGem.scaling.set(1.0, 1.3, 0.7);
@@ -355,13 +353,13 @@ export function createEnemyMesh(
       diameterTop: 0.85,
       diameterBottom: 0.65,
       height: 0.38,
-      tessellation: 6,
+      tessellation: 20,
     }, scene);
     crown.material = goldMat;
     crown.position.set(0, 1.88, 0);
     crown.parent = root;
 
-    const crownRuby = MeshBuilder.CreateIcoSphere('crown_ruby', { radius: 0.12, subdivisions: 1, flat: true }, scene);
+    const crownRuby = MeshBuilder.CreateSphere('crown_ruby', { diameter: 0.24, segments: 16 }, scene);
     crownRuby.material = rubyMat;
     crownRuby.position.set(0, 1.88, 0.42);
     crownRuby.parent = root;
@@ -375,13 +373,13 @@ export function createEnemyMesh(
       diameterTop: 0.22,
       diameterBottom: 0.1,
       height: 0.48,
-      tessellation: 8,
+      tessellation: 16,
     }, scene);
     exclamBar.material = exclamationMat;
     exclamBar.position.y = 0.18;
     exclamBar.parent = exclamationBubble;
 
-    const exclamDot = MeshBuilder.CreateSphere('exclam_dot', { diameter: 0.14, segments: 6 }, scene);
+    const exclamDot = MeshBuilder.CreateSphere('exclam_dot', { diameter: 0.14, segments: 12 }, scene);
     exclamDot.material = exclamationMat;
     exclamDot.position.y = -0.16;
     exclamDot.parent = exclamationBubble;
@@ -399,12 +397,11 @@ export function createEnemyMesh(
     telegraphRing.parent = root;
     telegraphRing.setEnabled(false);
   } else {
-    // Slimes (Green / Red) - Mario RPG Toy Aesthetics
+    // Slimes (Green / Red) - Mario RPG Toy Aesthetics: Smooth rounded jelly blob
     defaultMat = type === 'slime_red' ? redMat : greenMat;
-    body = MeshBuilder.CreateIcoSphere('slime_body', {
-      radius: 0.46,
-      subdivisions: 1,
-      flat: true,
+    body = MeshBuilder.CreateSphere('slime_body', {
+      diameter: 0.92,
+      segments: 24,
     }, scene);
     body.material = defaultMat;
     body.scaling.set(1.05, 0.82, 1.05);
@@ -413,39 +410,39 @@ export function createEnemyMesh(
 
     // Mario RPG Style Cartoon Eyes: White Cornea + Black Pupil + Specular Highlight Dot
     // Left Eye
-    const corneaL = MeshBuilder.CreateSphere('slime_cornea_l', { diameter: 0.18, segments: 5 }, scene);
+    const corneaL = MeshBuilder.CreateSphere('slime_cornea_l', { diameter: 0.18, segments: 16 }, scene);
     corneaL.material = eyeWhiteMat;
     corneaL.scaling.set(0.7, 1.0, 0.5);
     corneaL.position.set(-0.16, 0.42, 0.38);
     corneaL.parent = root;
 
-    const pupilL = MeshBuilder.CreateSphere('slime_pupil_l', { diameter: 0.1, segments: 4 }, scene);
+    const pupilL = MeshBuilder.CreateSphere('slime_pupil_l', { diameter: 0.1, segments: 16 }, scene);
     pupilL.material = eyeMat;
     pupilL.scaling.set(0.65, 0.9, 0.35);
     pupilL.position.set(-0.16, 0.42, 0.42);
     pupilL.parent = root;
     eyes.push(pupilL);
 
-    const glintL = MeshBuilder.CreateSphere('slime_glint_l', { diameter: 0.04, segments: 3 }, scene);
+    const glintL = MeshBuilder.CreateSphere('slime_glint_l', { diameter: 0.04, segments: 12 }, scene);
     glintL.material = eyeGlintMat;
     glintL.position.set(-0.14, 0.45, 0.44);
     glintL.parent = root;
 
     // Right Eye
-    const corneaR = MeshBuilder.CreateSphere('slime_cornea_r', { diameter: 0.18, segments: 5 }, scene);
+    const corneaR = MeshBuilder.CreateSphere('slime_cornea_r', { diameter: 0.18, segments: 16 }, scene);
     corneaR.material = eyeWhiteMat;
     corneaR.scaling.set(0.7, 1.0, 0.5);
     corneaR.position.set(0.16, 0.42, 0.38);
     corneaR.parent = root;
 
-    const pupilR = MeshBuilder.CreateSphere('slime_pupil_r', { diameter: 0.1, segments: 4 }, scene);
+    const pupilR = MeshBuilder.CreateSphere('slime_pupil_r', { diameter: 0.1, segments: 16 }, scene);
     pupilR.material = eyeMat;
     pupilR.scaling.set(0.65, 0.9, 0.35);
     pupilR.position.set(0.16, 0.42, 0.42);
     pupilR.parent = root;
     eyes.push(pupilR);
 
-    const glintR = MeshBuilder.CreateSphere('slime_glint_r', { diameter: 0.04, segments: 3 }, scene);
+    const glintR = MeshBuilder.CreateSphere('slime_glint_r', { diameter: 0.04, segments: 12 }, scene);
     glintR.material = eyeGlintMat;
     glintR.position.set(0.18, 0.45, 0.44);
     glintR.parent = root;
@@ -457,20 +454,20 @@ export function createEnemyMesh(
 
     if (type === 'slime_red') {
       // Fierce dual mini horns
-      const hornL = MeshBuilder.CreateCylinder('horn_l', { diameterTop: 0.02, diameterBottom: 0.1, height: 0.22, tessellation: 4 }, scene);
+      const hornL = MeshBuilder.CreateCylinder('horn_l', { diameterTop: 0.02, diameterBottom: 0.1, height: 0.22, tessellation: 16 }, scene);
       hornL.material = palette.get(scene, 'slime_horn_mat', new Color3(1.0, 0.85, 0.2));
       hornL.position.set(-0.12, 0.08, 0);
       hornL.rotation.z = -0.3;
       hornL.parent = antenna;
 
-      const hornR = MeshBuilder.CreateCylinder('horn_r', { diameterTop: 0.02, diameterBottom: 0.1, height: 0.22, tessellation: 4 }, scene);
+      const hornR = MeshBuilder.CreateCylinder('horn_r', { diameterTop: 0.02, diameterBottom: 0.1, height: 0.22, tessellation: 16 }, scene);
       hornR.material = palette.get(scene, 'slime_horn_mat', new Color3(1.0, 0.85, 0.2));
       hornR.position.set(0.12, 0.08, 0);
       hornR.rotation.z = 0.3;
       hornR.parent = antenna;
     } else {
       // Cute teardrop leaf sprout
-      const sprout = MeshBuilder.CreateSphere('sprout_bulb', { diameter: 0.14, segments: 4 }, scene);
+      const sprout = MeshBuilder.CreateSphere('sprout_bulb', { diameter: 0.14, segments: 16 }, scene);
       sprout.material = palette.get(scene, 'sprout_mat', new Color3(0.35, 0.95, 0.45));
       sprout.scaling.set(0.8, 1.4, 0.8);
       sprout.position.y = 0.08;
@@ -710,7 +707,7 @@ export function createBrambleProjectileMesh(scene: Scene): TransformNode {
   // Glowing toxic bramble core orb
   const core = MeshBuilder.CreateSphere('proj_core', {
     diameter: 0.36,
-    segments: 6,
+    segments: 16,
   }, scene);
   core.material = coreMat;
   core.parent = root;
@@ -730,7 +727,7 @@ export function createBrambleProjectileMesh(scene: Scene): TransformNode {
       diameterTop: 0.0,
       diameterBottom: 0.12,
       height: 0.22,
-      tessellation: 4,
+      tessellation: 12,
     }, scene);
     thorn.material = thornMat;
     thorn.position.set(px, py, pz);

@@ -121,12 +121,20 @@ async function run() {
   console.log('Testing Test 4: Picking up key and unlocking gate...');
   const unlockAndEnterTest = await page.evaluate(async () => {
     const store = window.__gameStore;
+    const loop = window.__gameLoop;
+    const advance = async (ms) => {
+      const steps = Math.max(1, Math.ceil(ms / 25));
+      for (let i = 0; i < steps; i++) {
+        loop?.tick(performance.now());
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    };
 
-    // A. Move to key pedestal at x = 10.0, z = 6.5
+    // A. Move to in front of key pedestal at x = 10.0, z = 5.5
     store.setState((prev) => ({
-      player: { ...prev.player, x: 10.0, z: 6.5, vx: 0, vz: 0 },
+      player: { ...prev.player, x: 10.0, z: 5.5, vx: 0, vz: 0 },
     }));
-    await new Promise((r) => setTimeout(r, 400));
+    await advance(400);
 
     const hasKey = store.getState().quest.hasDungeonKey;
 
@@ -134,7 +142,9 @@ async function run() {
     store.setState((prev) => ({
       player: { ...prev.player, x: 10.0, z: 10.5, vx: 0, vz: 2.0 },
     }));
-    await new Promise((r) => setTimeout(r, 500));
+    await advance(200);
+    window.__gameLoop?.requestAction();
+    await advance(300);
 
     const gateOpened = store.getState().quest.dungeonGateOpen;
 
@@ -142,7 +152,7 @@ async function run() {
     store.setState((prev) => ({
       player: { ...prev.player, x: 10.0, z: 14.0, vx: 0, vz: 0 },
     }));
-    await new Promise((r) => setTimeout(r, 500));
+    await advance(500);
 
     const stateInBossRoom = store.getState();
     const playerInBossRoom = stateInBossRoom.player.z >= 13.0;
@@ -153,6 +163,9 @@ async function run() {
       gateOpened,
       playerInBossRoom,
       bossState: boss ? boss.state : 'unknown',
+      currentMap: store.getState().currentMap,
+      playerPos: { x: store.getState().player.x, z: store.getState().player.z },
+      dungeonPickups: store.getState().pickups.filter(p => p.mapId === 'dungeon'),
     };
   });
   console.log('Unlock and enter test result:', unlockAndEnterTest);

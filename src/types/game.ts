@@ -26,6 +26,34 @@ export interface TileData {
   water?: boolean;
 }
 
+export interface NavPortal {
+  id: string;
+  name?: string;
+  fromChunk: string; // e.g. 'overworld' or 'overworld:2,1'
+  fromTile: Vector2D;
+  toChunk: string;   // e.g. 'dungeon' or 'dungeon:0,0'
+  toTile: Vector2D;
+  cost: number;
+  traversableByAI: boolean; // false for dungeon mouths (classic Zelda leashing), true where chase continues
+  bidirectional?: boolean;
+}
+
+export interface PathWaypoint extends Vector2D {
+  mapId?: MapId;
+  chunkId?: string;
+  isPortalTransition?: boolean;
+  portalId?: string;
+}
+
+export type PathStatus = 'complete' | 'partial' | 'unreachable';
+
+export interface PathResult {
+  waypoints: PathWaypoint[];
+  status: PathStatus;
+  targetReached: boolean;
+  totalCost: number;
+}
+
 export interface PlayerState {
   x: number;
   z: number;
@@ -74,6 +102,7 @@ export interface EnemyState {
   spawnX: number;
   spawnZ: number;
   mapId: MapId;
+  spawnMapId?: MapId;
   poiseTimer?: number;
   rangedCooldown?: number;
   castTimer?: number;
@@ -85,6 +114,11 @@ export interface EnemyState {
   pathWaypoints?: Vector2D[];
   aStarPath?: Vector2D[];
   pathUpdateTimer?: number;
+  pathPending?: boolean;
+  pathStatus?: PathStatus;
+  steeringBiasTimer?: number;
+  fallbackPacingTimer?: number;
+  fallbackPacingDir?: number;
   bossAction?: 'none' | 'telegraphing_ricochet' | 'telegraphing_eruption' | 'spore_burst';
   bossAttackType?: 'ricochet_volley' | 'ground_eruption' | 'spore_burst';
   bossTelegraphTimer?: number;

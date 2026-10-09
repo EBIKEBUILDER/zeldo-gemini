@@ -499,6 +499,15 @@ export interface SteeringResult {
   chosenBias: number;
 }
 
+// Smoothly interpolate angle along the shortest circular arc
+export function lerpAngle(current: number, target: number, maxStep: number): number {
+  let diff = (target - current) % (Math.PI * 2);
+  if (diff < -Math.PI) diff += Math.PI * 2;
+  if (diff > Math.PI) diff -= Math.PI * 2;
+  if (Math.abs(diff) <= maxStep) return target;
+  return current + Math.sign(diff) * maxStep;
+}
+
 // Smart obstacle steering for enemies and bosses
 // When direct path toward target is blocked by pillars, props, or walls,
 // Smart obstacle steering for all enemies (overworld slimes, dungeon mobs, and boss)
@@ -516,14 +525,15 @@ export function resolveSmartSteering(
   isGateOpen: boolean,
   mapId: string,
   preferredBias: number = 1,
-  breakables?: BreakableState[]
+  breakables?: BreakableState[],
+  currentFacingAngle?: number
 ): SteeringResult {
   const dx = targetX - currentX;
   const dz = targetZ - currentZ;
   const dist = Math.sqrt(dx * dx + dz * dz);
 
   if (dist < 0.05) {
-    return { x: currentX, z: currentZ, facingAngle: 0, chosenBias: preferredBias };
+    return { x: currentX, z: currentZ, facingAngle: currentFacingAngle ?? 0, chosenBias: preferredBias };
   }
 
   const directAngle = Math.atan2(dx, dz);

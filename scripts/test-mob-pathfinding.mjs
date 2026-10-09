@@ -49,6 +49,7 @@ async function run() {
             x: 26.0,
             z: 1.5,
             state: 'chase',
+            chaseTimer: 4.5,
             hitstunTimer: 0,
             vx: 0,
             vz: 0,
@@ -59,12 +60,15 @@ async function run() {
     }));
   });
 
-  // Let slime steer around the tree for 1.2 seconds
-  await new Promise((r) => setTimeout(r, 1200));
-
-  const slimeResult = await page.evaluate(() => {
-    const store = window.__gameStore.getState();
-    const slime = store.enemies.find((e) => e.mapId === 'overworld' && e.type === 'slime_green');
+  // Let slime steer around the tree for 1.75 seconds (sampling inside browser context to keep rAF active)
+  const slimeResult = await page.evaluate(async () => {
+    const store = window.__gameStore;
+    const loop = window.__gameLoop;
+    for (let i = 0; i < 70; i++) {
+      loop?.tick(performance.now());
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const slime = store.getState().enemies.find((e) => e.mapId === 'overworld' && e.type === 'slime_green');
     return {
       x: slime.x,
       z: slime.z,
@@ -115,11 +119,13 @@ async function run() {
 
   const redSlimeResult = await page.evaluate(async () => {
     const store = window.__gameStore;
+    const loop = window.__gameLoop;
     let maxDispZ = 0;
     let finalX = 0;
     let finalZ = 0;
 
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 50; i++) {
+      loop?.tick(performance.now());
       await new Promise((r) => setTimeout(r, 25));
       const slime = store.getState().enemies.find((e) => e.mapId === 'overworld' && e.type === 'slime_red');
       if (slime) {

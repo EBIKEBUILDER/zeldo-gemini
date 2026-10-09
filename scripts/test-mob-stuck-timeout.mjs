@@ -12,6 +12,17 @@ async function run() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
 
+  async function advanceGame(ms) {
+    await page.evaluate(async (duration) => {
+      const loop = window.__gameLoop;
+      const steps = Math.max(1, Math.ceil(duration / 25));
+      for (let i = 0; i < steps; i++) {
+        loop?.tick(performance.now());
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }, ms);
+  }
+
   page.on('console', (msg) => {
     if (msg.type() === 'error') {
       console.error('[Page Error]', msg.text());
@@ -27,7 +38,7 @@ async function run() {
       store.getState().startGame();
     }
   });
-  await new Promise((r) => setTimeout(r, 1200));
+  await advanceGame(1200);
 
   // --- TEST 1: INTELLIGENT A* WAYPOINT PATHFINDING AROUND TREE ---
   console.log('Test 1: Intelligent A* Waypoint Pathfinding around Tree at (26.0, 3.5)...');
@@ -54,7 +65,7 @@ async function run() {
     }));
   });
 
-  await new Promise((r) => setTimeout(r, 1200));
+  await advanceGame(1200);
 
   const slimePathResult = await page.evaluate(() => {
     const store = window.__gameStore.getState();
@@ -106,7 +117,7 @@ async function run() {
     }));
   });
 
-  await new Promise((r) => setTimeout(r, 400));
+  await advanceGame(400);
 
   const persistenceCheck = await page.evaluate(() => {
     const enemy = window.__gameStore.getState().enemies[0];
@@ -152,7 +163,7 @@ async function run() {
   });
 
   // Wait 500ms to allow stuckTimer to cross the 3.5s threshold
-  await new Promise((r) => setTimeout(r, 500));
+  await advanceGame(500);
 
   const timeoutCheck = await page.evaluate(() => {
     const enemy = window.__gameStore.getState().enemies[0];
@@ -181,7 +192,7 @@ async function run() {
   });
 
   // Wait 400ms for enemy to arrive at spawn (dist <= 0.6) and transition to idle
-  await new Promise((r) => setTimeout(r, 400));
+  await advanceGame(400);
 
   const stuckTimeoutResult = await page.evaluate(() => {
     const enemyAtSpawn = window.__gameStore.getState().enemies[0];
@@ -238,7 +249,7 @@ async function run() {
   });
 
   // Wait 300ms for projectile to spawn and travel
-  await new Promise((r) => setTimeout(r, 300));
+  await advanceGame(300);
 
   const bossAttackResult = await page.evaluate(() => {
     const store = window.__gameStore.getState();
@@ -297,7 +308,7 @@ async function run() {
   });
 
   // Wait 150ms for game loop to tick and register sword deflection
-  await new Promise((r) => setTimeout(r, 150));
+  await advanceGame(150);
 
   const deflectionResult = await page.evaluate(() => {
     const store = window.__gameStore;
@@ -365,7 +376,7 @@ async function run() {
   // Poll up to 1.5 seconds for hazard to erupt
   let eruptionResult = null;
   for (let attempt = 0; attempt < 15; attempt++) {
-    await new Promise((r) => setTimeout(r, 100));
+    await advanceGame(100);
     eruptionResult = await page.evaluate(() => {
       const store = window.__gameStore.getState();
       const hazard = store.groundHazards.find((h) => h.id === 'test_hazard_eruption');

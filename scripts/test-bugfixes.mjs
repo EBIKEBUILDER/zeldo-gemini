@@ -27,7 +27,7 @@ async function run() {
     }
   });
 
-  await page.goto('http://localhost:3000', { waitUntil: 'networkidle0', timeout: 30000 });
+  await page.goto('http://localhost:3005', { waitUntil: 'networkidle0', timeout: 30000 });
   await page.waitForSelector('#start-adventure-btn');
   // 1. Click Start Adventure
   await page.click('#start-adventure-btn');
@@ -43,7 +43,12 @@ async function run() {
 
   // Click canvas in center
   await page.mouse.click(640, 360);
-  await new Promise((r) => setTimeout(r, 100));
+  await page.evaluate(async () => {
+    for (let i = 0; i < 4; i++) {
+      window.__gameLoop?.tick(performance.now());
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  });
 
   const clickAttackState = await page.evaluate(() => {
     const store = window.__gameStore?.getState();
@@ -59,7 +64,12 @@ async function run() {
   console.log('PASS: Mouse click triggered sword attack successfully!');
 
   // Wait for attack animation to finish
-  await new Promise((r) => setTimeout(r, 400));
+  await page.evaluate(async () => {
+    for (let i = 0; i < 15; i++) {
+      window.__gameLoop?.tick(performance.now());
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  });
 
   // --- TEST 2: GRASS BILLBOARD PLANES VARIETY ---
   console.log('Testing Test 2: Grass billboard planes (random between 2 and 4)...');
@@ -68,7 +78,10 @@ async function run() {
     if (!scene) return { error: 'No scene found' };
 
     const tufts = scene.transformNodes.filter((n) => n.name === 'grass_tuft_root');
-    const planeCounts = tufts.map((t) => t.getChildren().length);
+    const planeCounts = tufts.map((t) => {
+      const child = t.getChildren()[0];
+      return child && child.getTotalVertices ? Math.round(child.getTotalVertices() / 4) : t.getChildren().length;
+    });
     const countDistribution = {};
     for (const c of planeCounts) {
       countDistribution[c] = (countDistribution[c] || 0) + 1;
@@ -89,6 +102,14 @@ async function run() {
   const pickupResults = await page.evaluate(async () => {
     const store = window.__gameStore;
     if (!store) return { error: 'No gameStore found' };
+    const loop = window.__gameLoop;
+    const advance = async (ms) => {
+      const steps = Math.max(1, Math.ceil(ms / 25));
+      for (let i = 0; i < steps; i++) {
+        loop?.tick(performance.now());
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    };
 
     const state = store.getState();
     const player = state.player;
@@ -113,7 +134,7 @@ async function run() {
     });
 
     // Wait 250ms for game loop ticks
-    await new Promise((r) => setTimeout(r, 250));
+    await advance(250);
 
     const pickupsAfterFull = store.getState().pickups;
     const heartStillThere = pickupsAfterFull.some((p) => p.id === testHeartId && !p.collected);
@@ -126,7 +147,7 @@ async function run() {
     }));
 
     // Wait 250ms for game loop ticks
-    await new Promise((r) => setTimeout(r, 250));
+    await advance(250);
 
     const stateAfterDamage = store.getState();
     console.log('[DEBUG Test 3] player after damage:', stateAfterDamage.player.health);
@@ -154,7 +175,7 @@ async function run() {
       ],
     });
 
-    await new Promise((r) => setTimeout(r, 250));
+    await advance(250);
     const stateAfterRupee = store.getState();
     console.log('[DEBUG Test 3] stateAfterRupee pickups count:', stateAfterRupee.pickups.length, 'testRupee:', stateAfterRupee.pickups.find(p => p.id === testRupeeId));
     const rupeeCollected = !stateAfterRupee.pickups.some((p) => p.id === testRupeeId);
@@ -184,6 +205,14 @@ async function run() {
   console.log('Testing Test 4: Tree collision and depenetration...');
   const collisionResults = await page.evaluate(async () => {
     const store = window.__gameStore;
+    const loop = window.__gameLoop;
+    const advance = async (ms) => {
+      const steps = Math.max(1, Math.ceil(ms / 25));
+      for (let i = 0; i < steps; i++) {
+        loop?.tick(performance.now());
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    };
     const map = store.getState().overworldMap;
     // Find a tree prop
     const tree = map.props.find((p) => p.type === 'tree');
@@ -199,7 +228,7 @@ async function run() {
     }));
 
     // Wait for physics loop
-    await new Promise((r) => setTimeout(r, 100));
+    await advance(100);
 
     // Force player directly inside the tree center (simulating extreme knockback/glitch)
     store.setState((prev) => ({
@@ -211,7 +240,7 @@ async function run() {
     }));
 
     // Wait 150ms for depenetration to execute
-    await new Promise((r) => setTimeout(r, 150));
+    await advance(150);
 
     const playerPosAfter = {
       x: store.getState().player.x,
