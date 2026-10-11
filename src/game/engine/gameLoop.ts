@@ -40,6 +40,7 @@ import {
 import { useGameStore } from '../state/gameStore';
 import { soundManager } from '@/audio/soundManager';
 import { ParticleState, Vector2D, ProjectileState, GroundHazardState, ContextAction } from '@/types/game';
+import { updateGreenSlime } from './ai/greenSlimeAI';
 
 class GameLoop {
   private isRunning: boolean = false;
@@ -576,9 +577,36 @@ class GameLoop {
                   maxLife: 0.5,
                 });
               }
-              // Drop chance: 60% rupee, 30% heart
+              // Drop chance: 60% rupee, 30% heart (in boss chamber: 75% heart for emergency healing)
               const roll = Math.random();
-              if (roll < 0.6) {
+              const isBossChamber = store.currentMap === 'dungeon' && item.z >= 12.0;
+              if (isBossChamber) {
+                if (roll < 0.75) {
+                  pickups.push({
+                    id: `heart_${Date.now()}_${Math.random()}`,
+                    type: 'heart',
+                    x: item.x,
+                    z: item.z,
+                    value: 2,
+                    bobOffset: Math.random() * Math.PI,
+                    collected: false,
+                    magnetActive: false,
+                    mapId: store.currentMap,
+                  });
+                } else {
+                  pickups.push({
+                    id: `rupee_${Date.now()}_${Math.random()}`,
+                    type: 'rupee',
+                    x: item.x,
+                    z: item.z,
+                    value: 1,
+                    bobOffset: Math.random() * Math.PI,
+                    collected: false,
+                    magnetActive: false,
+                    mapId: store.currentMap,
+                  });
+                }
+              } else if (roll < 0.6) {
                 pickups.push({
                   id: `rupee_${Date.now()}_${Math.random()}`,
                   type: 'rupee',
@@ -611,17 +639,39 @@ class GameLoop {
       // Check hits against enemies
       enemies.forEach((enemy) => {
         if (enemy.mapId === store.currentMap && !enemy.isDead && enemy.hitstunTimer <= 0) {
-          if (
-            isInsideSwordSweep(
-              player.x,
-              player.z,
-              player.facingAngle,
-              enemy.x,
-              enemy.z,
-              enemy.radius
-            )
-          ) {
-            enemy.hp -= 1;
+            if (
+              isInsideSwordSweep(
+                player.x,
+                player.z,
+                player.facingAngle,
+                enemy.x,
+                enemy.z,
+                enemy.radius
+              )
+            ) {
+              if (enemy.type === 'boss_gorgoth' && enemy.bossAction === 'lunging') {
+                // Boss Hyper-Lunge: Cannot be hit, damaged, or knocked back by sword!
+                soundManager.playBossReflect();
+                for (let i = 0; i < 7; i++) {
+                  activeParticles.push({
+                    id: `lunge_deflect_${Date.now()}_${Math.random()}`,
+                    type: 'spark',
+                    x: (player.x + enemy.x) * 0.5,
+                    y: 0.7,
+                    z: (player.z + enemy.z) * 0.5,
+                    vx: (Math.random() - 0.5) * 4.5,
+                    vy: 1.5 + Math.random() * 2.0,
+                    vz: (Math.random() - 0.5) * 4.5,
+                    size: 0.14,
+                    color: '#38bdf8',
+                    life: 0.3,
+                    maxLife: 0.3,
+                  });
+                }
+                return; // Completely uninterruptible and invulnerable during lunge!
+              }
+
+              enemy.hp -= 1;
             enemy.hitFlashTimer = 0.16;
 
             // Knockback calculation
@@ -815,9 +865,42 @@ class GameLoop {
     enemies.forEach((enemy) => {
       if (enemy.mapId !== store.currentMap) return;
 
+      if (enemy.type === 'slime_green') {
+        updateGreenSlime(enemy, {
+          dt,
+          player,
+          currentMap: store.currentMap,
+          currentMapData,
+          overworldMap: store.overworldMap,
+          dungeonMap: store.dungeonMap,
+          breakables,
+          isGateOpen: quest.dungeonGateOpen,
+          applyPlayerDamage: (damage, knockX, knockZ) => {
+            player.health = Math.max(0, player.health - damage);
+            player.iFrames = 1.2;
+            screenShake = 0.4;
+            damageFlash = 0.85;
+            soundManager.playPlayerHurt();
+            player.vx = knockX;
+            player.vz = knockZ;
+
+            if (player.health <= 0) {
+              soundManager.stopMusic();
+              soundManager.playGameOver();
+              useGameStore.setState({
+                gameState: 'game_over',
+                player,
+                stats,
+              });
+            }
+          },
+        });
+        return;
+      }
+
       if (enemy.isDead) {
-        // Boss never respawns; overworld enemies respawn after 20s
-        if (enemy.type !== 'boss_gorgoth') {
+        // Boss and dungeon enemies never respawn; overworld enemies respawn after 20s
+        if (enemy.type !== 'boss_gorgoth' && enemy.mapId === 'overworld') {
           enemy.respawnTimer -= dt;
           if (enemy.respawnTimer <= 0) {
             enemy.isDead = false;
@@ -1199,28 +1282,17 @@ class GameLoop {
         enemy.hopCycle += dt * (isBoss ? 4.0 : 6.0);
         const moveSpeed = enemy.speed * (0.8 + 0.4 * Math.max(0, Math.sin(enemy.hopCycle)));
 
-        // 1. If boss is winding up a ranged bramble shot, pause movement to telegraph
-        const isBossCasting = isBoss && enemy.castTimer && enemy.castTimer > 0;
+        // 1. If boss is winding up or executing a special action, pause normal pathfinding
+        const isBossInSpecialAction = isBoss && (
+          (enemy.castTimer !== undefined && enemy.castTimer > 0) ||
+          enemy.bossAction === 'telegraphing_lunge' ||
+          enemy.bossAction === 'lunging' ||
+          enemy.bossAction === 'lunge_recovery' ||
+          enemy.bossAction === 'telegraphing_ranged'
+        );
 
-        if (isBossCasting) {
-          enemy.facingAngle = Math.atan2(dx, dz);
-          // Spawn swirling toxic briar particles
-          if (Math.random() < 0.4) {
-            activeParticles.push({
-              id: `briar_${Date.now()}_${Math.random()}`,
-              type: 'leaf',
-              x: enemy.x + (Math.random() - 0.5) * 1.3,
-              y: 0.5 + Math.random() * 0.7,
-              z: enemy.z + (Math.random() - 0.5) * 1.3,
-              vx: (Math.random() - 0.5) * 1.6,
-              vy: 1.2 + Math.random() * 1.8,
-              vz: (Math.random() - 0.5) * 1.6,
-              size: 0.12,
-              color: '#52b724',
-              life: 0.35,
-              maxLife: 0.35,
-            });
-          }
+        if (isBossInSpecialAction) {
+          // Special action movement & particle updates handled below in boss state machine
         } else {
           // ALL ENEMIES use intelligent A* waypoint pathfinding + smart obstacle steering!
           // Maneuvers around trees, rocks, hedges, water, pillars, clay pots, and walls.
@@ -1296,79 +1368,220 @@ class GameLoop {
           }
         }
 
-        // 2. Boss Dynamic Multi-Phase Ranged & Area Attacks (Mario RPG Style Encounter)
+        // 2. Boss Dynamic Multi-Phase Ranged, Area & Lunge Attacks (Mario RPG Style Encounter)
         if (isBoss && !quest.bossDefeated) {
+          if (enemy.lungeCooldown === undefined) {
+            enemy.lungeCooldown = 4.0; // initial grace period upon entering boss room
+          }
           if (enemy.rangedCooldown === undefined) {
-            enemy.rangedCooldown = 2.0; // initial grace period upon entering boss room
+            enemy.rangedCooldown = 3.5;
           }
 
-          if (enemy.castTimer && enemy.castTimer > 0) {
+          // Decrement cooldowns when boss is in neutral chase
+          if (enemy.bossAction === 'none' || !enemy.bossAction) {
+            if (enemy.lungeCooldown > 0) enemy.lungeCooldown -= dt;
+            if (enemy.rangedCooldown > 0) enemy.rangedCooldown -= dt;
+          }
+
+          // State 1: Telegraphing Lunge (Red danger path on ground)
+          if (enemy.bossAction === 'telegraphing_lunge') {
+            enemy.bossTelegraphTimer = (enemy.bossTelegraphTimer ?? ENEMY_SETTINGS.boss_gorgoth.lungeWindup) - dt;
+            if (enemy.lungeDirection) {
+              enemy.facingAngle = Math.atan2(enemy.lungeDirection.x, enemy.lungeDirection.z);
+            }
+            // Anticipation spark / dust particles along boss path
+            if (Math.random() < 0.4) {
+              activeParticles.push({
+                id: `lunge_prep_${Date.now()}_${Math.random()}`,
+                type: 'spark',
+                x: enemy.x + (Math.random() - 0.5) * 1.2,
+                y: 0.15,
+                z: enemy.z + (Math.random() - 0.5) * 1.2,
+                vx: (Math.random() - 0.5) * 1.5,
+                vy: 0.8 + Math.random() * 1.2,
+                vz: (Math.random() - 0.5) * 1.5,
+                size: 0.12,
+                color: '#ef4444',
+                life: 0.3,
+                maxLife: 0.3,
+              });
+            }
+
+            if (enemy.bossTelegraphTimer <= 0) {
+              enemy.bossAction = 'lunging';
+              enemy.lungeTimer = ENEMY_SETTINGS.boss_gorgoth.lungeDuration;
+              soundManager.playBossCharge();
+              screenShake = Math.max(screenShake, 0.25);
+            }
+          }
+          // State 2: Active Lunge Dash (Fast, uninterruptible, invulnerable surge)
+          else if (enemy.bossAction === 'lunging') {
+            enemy.lungeTimer = (enemy.lungeTimer ?? ENEMY_SETTINGS.boss_gorgoth.lungeDuration) - dt;
+            const lDirX = enemy.lungeDirection?.x || Math.sin(enemy.facingAngle);
+            const lDirZ = enemy.lungeDirection?.z || Math.cos(enemy.facingAngle);
+            const stepDist = ENEMY_SETTINGS.boss_gorgoth.lungeSpeed * dt;
+            const nextX = enemy.x + lDirX * stepDist;
+            const nextZ = enemy.z + lDirZ * stepDist;
+
+            const isBlocked = isPositionBlocked(
+              nextX,
+              nextZ,
+              enemy.radius,
+              currentMapData,
+              quest.dungeonGateOpen,
+              store.currentMap,
+              breakables
+            );
+
+            if (isBlocked) {
+              // Slammed into solid pillar or perimeter wall!
+              screenShake = 0.42;
+              soundManager.playPotSmash();
+              for (let p = 0; p < 8; p++) {
+                activeParticles.push({
+                  id: `wall_slam_${Date.now()}_${Math.random()}`,
+                  type: 'poof',
+                  x: enemy.x + lDirX * enemy.radius,
+                  y: 0.6,
+                  z: enemy.z + lDirZ * enemy.radius,
+                  vx: (Math.random() - 0.5) * 3.5,
+                  vy: 1.0 + Math.random() * 2.0,
+                  vz: (Math.random() - 0.5) * 3.5,
+                  size: 0.2,
+                  color: '#e2e8f0',
+                  life: 0.35,
+                  maxLife: 0.35,
+                });
+              }
+              // End lunge early, transition to recovery
+              enemy.bossAction = 'lunge_recovery';
+              enemy.lungeRecoveryTimer = ENEMY_SETTINGS.boss_gorgoth.lungeRecovery;
+            } else {
+              enemy.x = nextX;
+              enemy.z = nextZ;
+
+              // Speed trail particles behind charging boss
+              activeParticles.push({
+                id: `lunge_trail_${Date.now()}_${Math.random()}`,
+                type: 'poof',
+                x: enemy.x - lDirX * 0.9 + (Math.random() - 0.5) * 0.4,
+                y: 0.2,
+                z: enemy.z - lDirZ * 0.9 + (Math.random() - 0.5) * 0.4,
+                vx: -lDirX * 2.0,
+                vy: 0.5 + Math.random() * 0.8,
+                vz: -lDirZ * 2.0,
+                size: 0.22,
+                color: '#f87171',
+                life: 0.28,
+                maxLife: 0.28,
+              });
+            }
+
+            // Contact hit with player during lunge
+            if (distToPlayer < enemy.radius + PLAYER_RADIUS && player.iFrames <= 0) {
+              player.health = Math.max(0, player.health - ENEMY_SETTINGS.boss_gorgoth.lungeDamage);
+              player.iFrames = 1.3;
+              screenShake = 0.5;
+              damageFlash = 0.9;
+              soundManager.playPlayerHurt();
+              player.vx = lDirX * 9.5;
+              player.vz = lDirZ * 9.5;
+
+              if (player.health <= 0) {
+                soundManager.stopMusic();
+                soundManager.playGameOver();
+                useGameStore.setState({ gameState: 'game_over', player, stats });
+                return;
+              }
+            }
+
+            if (enemy.lungeTimer !== undefined && enemy.lungeTimer <= 0) {
+              enemy.bossAction = 'lunge_recovery';
+              enemy.lungeRecoveryTimer = ENEMY_SETTINGS.boss_gorgoth.lungeRecovery;
+            }
+          }
+          // State 3: Lunge Recovery (Vulnerable opening for player)
+          else if (enemy.bossAction === 'lunge_recovery') {
+            enemy.lungeRecoveryTimer = (enemy.lungeRecoveryTimer ?? ENEMY_SETTINGS.boss_gorgoth.lungeRecovery) - dt;
+            if (enemy.lungeRecoveryTimer <= 0) {
+              enemy.bossAction = 'none';
+              enemy.lungeCooldown = ENEMY_SETTINGS.boss_gorgoth.lungeCooldown + (Math.random() * 0.8 - 0.4);
+            }
+          }
+          // State 4: Telegraphing Ranged Attack (Aiming reticle at player)
+          else if (enemy.bossAction === 'telegraphing_ranged') {
+            enemy.bossTelegraphTimer = (enemy.bossTelegraphTimer ?? ENEMY_SETTINGS.boss_gorgoth.projectileWindup) - dt;
+            if (enemy.bossTelegraphTarget) {
+              enemy.facingAngle = Math.atan2(
+                enemy.bossTelegraphTarget.x - enemy.x,
+                enemy.bossTelegraphTarget.z - enemy.z
+              );
+            }
+            if (Math.random() < 0.4) {
+              activeParticles.push({
+                id: `bomb_charge_${Date.now()}_${Math.random()}`,
+                type: 'spark',
+                x: enemy.x + (Math.random() - 0.5) * 1.5,
+                y: 0.6 + Math.random() * 0.8,
+                z: enemy.z + (Math.random() - 0.5) * 1.5,
+                vx: (enemy.x - (enemy.x + (Math.random() - 0.5) * 1.5)) * 1.5,
+                vy: 0.5,
+                vz: (enemy.z - (enemy.z + (Math.random() - 0.5) * 1.5)) * 1.5,
+                size: 0.12,
+                color: '#eab308',
+                life: 0.3,
+                maxLife: 0.3,
+              });
+            }
+
+            if (enemy.bossTelegraphTimer <= 0) {
+              const targetX = enemy.bossTelegraphTarget ? enemy.bossTelegraphTarget.x : player.x;
+              const targetZ = enemy.bossTelegraphTarget ? enemy.bossTelegraphTarget.z : player.z;
+              const tDx = targetX - enemy.x;
+              const tDz = targetZ - enemy.z;
+              const tDist = Math.hypot(tDx, tDz) || 0.001;
+              const pSpeed = ENEMY_SETTINGS.boss_gorgoth.sporeBombSpeed;
+              const dirX = tDx / tDist;
+              const dirZ = tDz / tDist;
+
+              projectiles.push({
+                id: `proj_boss_bomb_${Date.now()}_${Math.random()}`,
+                type: 'spore_bomb',
+                x: enemy.x + dirX * 1.2,
+                z: enemy.z + dirZ * 1.2,
+                vx: dirX * pSpeed,
+                vz: dirZ * pSpeed,
+                targetX,
+                targetZ,
+                radius: ENEMY_SETTINGS.boss_gorgoth.sporeBombRadius,
+                damage: ENEMY_SETTINGS.boss_gorgoth.projectileDamage,
+                life: 3.5,
+                maxLife: 3.5,
+                source: 'boss',
+                color: '#eab308',
+                mapId: 'dungeon',
+              });
+
+              soundManager.playBossShoot();
+              enemy.bossAction = 'none';
+              enemy.bossTelegraphTimer = 0;
+              enemy.bossTelegraphTarget = undefined;
+              enemy.rangedCooldown = ENEMY_SETTINGS.boss_gorgoth.projectileCooldown + (Math.random() * 0.8 - 0.4);
+            }
+          }
+          // State 5: Legacy Briar Eruption / Ricochet Casting (if active)
+          else if (enemy.castTimer && enemy.castTimer > 0) {
             enemy.castTimer -= dt;
             enemy.bossTelegraphTimer = enemy.castTimer;
-
             if (enemy.castTimer <= 0) {
               enemy.bossAction = 'none';
               enemy.bossTelegraphTimer = 0;
-
-              if (enemy.bossAttackType === 'ground_eruption') {
-                // Briar Root Eruption is already armed and ticking in groundHazards
-                soundManager.playBossRoar();
-                enemy.rangedCooldown = ENEMY_SETTINGS.boss_gorgoth.projectileCooldown + (Math.random() * 0.6 - 0.3);
-              } else {
-                // Launch ricocheting bramble thorn projectile(s) towards player
-                const pDist = Math.sqrt(dx * dx + dz * dz) || 0.001;
-                const pSpeed = ENEMY_SETTINGS.boss_gorgoth.projectileSpeed;
-                const dirX = dx / pDist;
-                const dirZ = dz / pDist;
-
-                projectiles.push({
-                  id: `proj_boss_${Date.now()}_${Math.random()}`,
-                  x: enemy.x + dirX * 1.15,
-                  z: enemy.z + dirZ * 1.15,
-                  vx: dirX * pSpeed,
-                  vz: dirZ * pSpeed,
-                  radius: ENEMY_SETTINGS.boss_gorgoth.projectileRadius,
-                  damage: ENEMY_SETTINGS.boss_gorgoth.projectileDamage,
-                  life: 4.0,
-                  maxLife: 4.0,
-                  source: 'boss',
-                  color: '#7bc637',
-                  mapId: 'dungeon',
-                  bounces: 2,
-                  maxBounces: 2,
-                });
-
-                // Phase 2 (<= 5 HP): Gorgoth shoots a dual-thorn spread!
-                if (enemy.hp <= 5) {
-                  const angleOffset = 0.26; // ~15 degrees
-                  const cosA = Math.cos(angleOffset);
-                  const sinA = Math.sin(angleOffset);
-                  const altX = dirX * cosA - dirZ * sinA;
-                  const altZ = dirX * sinA + dirZ * cosA;
-
-                  projectiles.push({
-                    id: `proj_boss_p2_${Date.now()}_${Math.random()}`,
-                    x: enemy.x + altX * 1.15,
-                    z: enemy.z + altZ * 1.15,
-                    vx: altX * pSpeed,
-                    vz: altZ * pSpeed,
-                    radius: ENEMY_SETTINGS.boss_gorgoth.projectileRadius,
-                    damage: ENEMY_SETTINGS.boss_gorgoth.projectileDamage,
-                    life: 4.0,
-                    maxLife: 4.0,
-                    source: 'boss',
-                    color: '#7bc637',
-                    mapId: 'dungeon',
-                    bounces: 2,
-                    maxBounces: 2,
-                  });
-                }
-
-                soundManager.playBossShoot();
-                enemy.rangedCooldown = ENEMY_SETTINGS.boss_gorgoth.projectileCooldown + (Math.random() * 0.8 - 0.4);
-              }
+              soundManager.playBossShoot();
+              enemy.rangedCooldown = ENEMY_SETTINGS.boss_gorgoth.projectileCooldown + (Math.random() * 0.8 - 0.4);
             }
-          } else if (enemy.rangedCooldown <= 0) {
+          }
+          // State 6: Neutral Chase - Choose Next Attack
+          else {
             const hasClearLoS = hasLineOfSight(
               enemy.x,
               enemy.z,
@@ -1381,64 +1594,56 @@ class GameLoop {
               breakables
             );
 
-            // Check if player is hiding in any room corner (boss room: x: 3..16, z: 12..22)
+            // Check if player is hiding in room corner
             const isPlayerInCorner =
               (player.x <= 5.5 && player.z >= 19.0) ||
               (player.x >= 13.5 && player.z >= 19.0) ||
               (player.x <= 5.5 && player.z <= 14.5) ||
               (player.x >= 13.5 && player.z <= 14.5);
 
-            const isPlayerDistant = distToPlayer > 3.0;
-            const isBossStuck = (enemy.stuckTimer || 0) > 0.5;
+            const isPlayerAtRange = distToPlayer > 4.2;
+            const isBossStuck = (enemy.stuckTimer || 0) > 0.4;
+            const isPlayerUnreachable = !hasClearLoS || enemy.pathStatus === 'partial' || isBossStuck || isPlayerInCorner;
 
-            // Trigger dynamic ranged attack:
-            if (isPlayerInCorner || !hasClearLoS || isPlayerDistant || isBossStuck || distToPlayer > 2.2) {
-              // Decide between Briar Root Eruption (Anti-Corner / Flush) or Ricochet Volley:
-              // If player is in corner or unreachable without line-of-sight, 65% chance to cast Briar Root Eruption
-              const rollEruption = (isPlayerInCorner || !hasClearLoS || isBossStuck) && Math.random() < 0.65;
+            // Decision: Ranged Attack (when boss is at range and/or player is somewhere boss cannot reach)
+            if ((isPlayerAtRange || isPlayerUnreachable) && (enemy.rangedCooldown ?? 0) <= 0) {
+              enemy.bossAction = 'telegraphing_ranged';
+              enemy.bossAttackType = 'spore_bomb';
+              enemy.bossTelegraphTimer = ENEMY_SETTINGS.boss_gorgoth.projectileWindup;
+              enemy.bossTelegraphMax = ENEMY_SETTINGS.boss_gorgoth.projectileWindup;
+              enemy.bossTelegraphTarget = { x: player.x, z: player.z };
+              soundManager.playBossCharge();
+            }
+            // Decision: Lunge Attack (at mid-range with clear line of sight)
+            else if (distToPlayer >= 1.8 && distToPlayer <= 5.5 && hasClearLoS && (enemy.lungeCooldown ?? 0) <= 0) {
+              enemy.bossAction = 'telegraphing_lunge';
+              enemy.bossAttackType = 'lunge';
+              enemy.bossTelegraphTimer = ENEMY_SETTINGS.boss_gorgoth.lungeWindup;
+              enemy.bossTelegraphMax = ENEMY_SETTINGS.boss_gorgoth.lungeWindup;
 
-              if (rollEruption) {
-                // Ability 2: Telegraphed Briar Root Eruption under player's feet
-                enemy.bossAction = 'telegraphing_eruption';
-                enemy.bossAttackType = 'ground_eruption';
-                enemy.castTimer = ENEMY_SETTINGS.boss_gorgoth.groundEruptionWindup;
-                enemy.bossTelegraphTimer = ENEMY_SETTINGS.boss_gorgoth.groundEruptionWindup;
-                enemy.bossTelegraphTarget = { x: player.x, z: player.z };
-                soundManager.playBossRumble();
-
-                groundHazards.push({
-                  id: `hazard_eruption_${Date.now()}_${Math.random()}`,
-                  type: 'briar_eruption',
-                  x: player.x,
-                  z: player.z,
-                  radius: ENEMY_SETTINGS.boss_gorgoth.groundEruptionRadius,
-                  timer: ENEMY_SETTINGS.boss_gorgoth.groundEruptionWindup,
-                  maxTimer: ENEMY_SETTINGS.boss_gorgoth.groundEruptionWindup,
-                  duration: 0.85,
-                  erupted: false,
-                  damage: ENEMY_SETTINGS.boss_gorgoth.groundEruptionDamage,
-                  mapId: 'dungeon',
-                });
-              } else {
-                // Ability 1: Ricochet Bramble Volley (bounces off walls to track corner campers)
-                enemy.bossAction = 'telegraphing_ricochet';
-                enemy.bossAttackType = 'ricochet_volley';
-                enemy.castTimer = ENEMY_SETTINGS.boss_gorgoth.projectileWindup;
-                enemy.bossTelegraphTimer = ENEMY_SETTINGS.boss_gorgoth.projectileWindup;
-                soundManager.playBossCharge();
-              }
-            } else {
-              enemy.rangedCooldown = 1.0;
+              const lungeDirX = dx / (distToPlayer || 0.001);
+              const lungeDirZ = dz / (distToPlayer || 0.001);
+              enemy.lungeDirection = { x: lungeDirX, z: lungeDirZ };
+              const lungeDist = Math.min(ENEMY_SETTINGS.boss_gorgoth.lungeDistance, Math.max(3.2, distToPlayer + 1.2));
+              enemy.lungeDistance = lungeDist;
+              enemy.lungeTarget = {
+                x: enemy.x + lungeDirX * lungeDist,
+                z: enemy.z + lungeDirZ * lungeDist,
+              };
+              enemy.bossTelegraphTarget = enemy.lungeTarget;
+              enemy.facingAngle = Math.atan2(lungeDirX, lungeDirZ);
+              soundManager.playBossCharge();
             }
           }
         }
 
-        // Contact damage against player
-        const touchDist = enemy.radius + PLAYER_RADIUS;
-        if (distToPlayer < touchDist && player.iFrames <= 0 && enemy.attackCooldown <= 0) {
+        // Contact damage against player (when not in special lunge attack, which handles its own collision)
+        if (enemy.bossAction !== 'lunging') {
+          const touchDist = enemy.radius + PLAYER_RADIUS;
+          if (distToPlayer < touchDist && player.iFrames <= 0 && enemy.attackCooldown <= 0) {
           player.health = Math.max(0, player.health - enemy.damage);
-          player.iFrames = 1.1;
-          enemy.attackCooldown = 0.8;
+          player.iFrames = 1.2;
+          enemy.attackCooldown = enemy.type === 'boss_gorgoth' ? 1.3 : 0.8;
           screenShake = 0.4;
           damageFlash = 0.85;
 
@@ -1470,7 +1675,8 @@ class GameLoop {
             return;
           }
         }
-      } else {
+      }
+    } else {
         // Pursuit dropped or idle
         const distToSpawn = Math.hypot(enemy.x - enemy.spawnX, enemy.z - enemy.spawnZ);
         if (enemy.state === 'chase' && distToSpawn > 0.6) {
@@ -1725,6 +1931,71 @@ class GameLoop {
     // --- 7B. PROJECTILES SIMULATION & COLLISION ---
     const activeProjectiles: ProjectileState[] = [];
 
+    const triggerSporeBombExplosion = (bombX: number, bombZ: number, bombDamage: number) => {
+      screenShake = Math.max(screenShake, 0.4);
+      soundManager.playBossStomp();
+      soundManager.playPotSmash();
+
+      // Burst of 18 glowing shrapnel and toxic spore particles
+      for (let i = 0; i < 18; i++) {
+        const pAngle = Math.random() * Math.PI * 2;
+        const pSpeed = 2.0 + Math.random() * 4.2;
+        activeParticles.push({
+          id: `bomb_exp_${Date.now()}_${Math.random()}`,
+          type: i % 2 === 0 ? 'spark' : 'leaf',
+          x: bombX,
+          y: 0.35 + Math.random() * 0.4,
+          z: bombZ,
+          vx: Math.cos(pAngle) * pSpeed,
+          vy: 1.5 + Math.random() * 2.5,
+          vz: Math.sin(pAngle) * pSpeed,
+          size: 0.14,
+          color: i % 3 === 0 ? '#ef4444' : i % 3 === 1 ? '#eab308' : '#84cc16',
+          life: 0.4,
+          maxLife: 0.4,
+        });
+      }
+
+      // Direct explosion blast damage if player is within explosion blast radius
+      const pDistToBlast = Math.hypot(player.x - bombX, player.z - bombZ);
+      if (pDistToBlast < 1.65 && player.iFrames <= 0) {
+        player.health = Math.max(0, player.health - bombDamage);
+        player.iFrames = 1.2;
+        damageFlash = 0.8;
+        soundManager.playPlayerHurt();
+        const knockDirX = (player.x - bombX) / (pDistToBlast || 0.001);
+        const knockDirZ = (player.z - bombZ) / (pDistToBlast || 0.001);
+        player.vx = knockDirX * 7.5;
+        player.vz = knockDirZ * 7.5;
+
+        if (player.health <= 0) {
+          soundManager.stopMusic();
+          soundManager.playGameOver();
+          useGameStore.setState({
+            gameState: 'game_over',
+            player,
+            stats,
+          });
+          return;
+        }
+      }
+
+      // Spawn lingering Area of Effect (AoE) toxic pool zone
+      groundHazards.push({
+        id: `hazard_aoe_${Date.now()}_${Math.random()}`,
+        type: 'toxic_patch',
+        x: bombX,
+        z: bombZ,
+        radius: ENEMY_SETTINGS.boss_gorgoth.sporeAoeRadius,
+        timer: 0,
+        maxTimer: ENEMY_SETTINGS.boss_gorgoth.sporeAoeDuration,
+        duration: ENEMY_SETTINGS.boss_gorgoth.sporeAoeDuration,
+        erupted: true,
+        damage: ENEMY_SETTINGS.boss_gorgoth.sporeAoeDamage,
+        mapId: 'dungeon',
+      });
+    };
+
     projectiles.forEach((proj) => {
       if (proj.mapId !== store.currentMap) return;
 
@@ -1746,6 +2017,11 @@ class GameLoop {
           breakables
         )
       ) {
+        if (proj.type === 'spore_bomb') {
+          triggerSporeBombExplosion(proj.x, proj.z, proj.damage);
+          return;
+        }
+
         // Boss Bramble projectile bounces off walls/pillars to flush out corner campers!
         if (proj.bounces && proj.bounces > 0) {
           const xBlocked = isPositionBlocked(
@@ -1820,6 +2096,18 @@ class GameLoop {
       proj.x = nextX;
       proj.z = nextZ;
 
+      // Spore Bomb Destination / Fuse Detonation
+      if (proj.type === 'spore_bomb') {
+        const distToTarget = (proj.targetX !== undefined && proj.targetZ !== undefined)
+          ? Math.hypot(proj.x - proj.targetX, proj.z - proj.targetZ)
+          : 999;
+
+        if (distToTarget <= 0.45 || proj.life <= 0.1) {
+          triggerSporeBombExplosion(proj.x, proj.z, proj.damage);
+          return;
+        }
+      }
+
       // Deflected Projectile Collision with Enemies
       if (proj.source === 'player') {
         let hitEnemy = false;
@@ -1828,6 +2116,38 @@ class GameLoop {
           if (e.mapId !== store.currentMap || e.isDead) continue;
           const eDist = Math.hypot(e.x - proj.x, e.z - proj.z);
           if (eDist < e.radius + proj.radius) {
+            if (e.type === 'boss_gorgoth' && e.bossAction === 'lunging') {
+              // Boss is completely uninterruptible & invulnerable during lunge!
+              soundManager.playBossReflect();
+              for (let p = 0; p < 7; p++) {
+                activeParticles.push({
+                  id: `deflect_lunge_proj_${Date.now()}_${Math.random()}`,
+                  type: 'spark',
+                  x: proj.x,
+                  y: 0.6,
+                  z: proj.z,
+                  vx: (Math.random() - 0.5) * 4.0,
+                  vy: 1.5 + Math.random() * 2.0,
+                  vz: (Math.random() - 0.5) * 4.0,
+                  size: 0.12,
+                  color: '#38bdf8',
+                  life: 0.35,
+                  maxLife: 0.35,
+                });
+              }
+              hitEnemy = true;
+              break;
+            }
+
+            if (proj.type === 'spore_bomb') {
+              triggerSporeBombExplosion(proj.x, proj.z, proj.damage);
+              e.hp = Math.max(0, e.hp - proj.damage * 2);
+              e.hitFlashTimer = 0.25;
+              soundManager.playEnemyHurt();
+              hitEnemy = true;
+              break;
+            }
+
             e.hp = Math.max(0, e.hp - proj.damage);
             e.hitFlashTimer = 0.25;
             soundManager.playEnemyHurt();
@@ -1860,54 +2180,108 @@ class GameLoop {
         const pDist = Math.sqrt(pDx * pDx + pDz * pDz);
 
         if (pDist < proj.radius + PLAYER_RADIUS && player.iFrames <= 0) {
+          if (proj.type === 'spore_bomb') {
+            triggerSporeBombExplosion(proj.x, proj.z, proj.damage);
+            return;
+          }
+
           player.health = Math.max(0, player.health - proj.damage);
           player.iFrames = PLAYER_IFRAMES_DURATION;
           screenShake = 0.28;
           damageFlash = 0.75;
           soundManager.playPlayerHurt();
 
-        // Player impact sparks
-        for (let i = 0; i < 6; i++) {
-          activeParticles.push({
-            id: `proj_hit_${Date.now()}_${Math.random()}`,
-            type: 'spark',
-            x: player.x,
-            y: 0.6,
-            z: player.z,
-            vx: (Math.random() - 0.5) * 4.0,
-            vy: 1.5 + Math.random() * 2.5,
-            vz: (Math.random() - 0.5) * 4.0,
-            size: 0.1,
-            color: '#ffdd44',
-            life: 0.3,
-            maxLife: 0.3,
-          });
-        }
+          // Player impact sparks
+          for (let i = 0; i < 6; i++) {
+            activeParticles.push({
+              id: `proj_hit_${Date.now()}_${Math.random()}`,
+              type: 'spark',
+              x: player.x,
+              y: 0.6,
+              z: player.z,
+              vx: (Math.random() - 0.5) * 4.0,
+              vy: 1.5 + Math.random() * 2.5,
+              vz: (Math.random() - 0.5) * 4.0,
+              size: 0.1,
+              color: '#ffdd44',
+              life: 0.3,
+              maxLife: 0.3,
+            });
+          }
 
-        if (player.health <= 0) {
-          soundManager.stopMusic();
-          soundManager.playGameOver();
-          useGameStore.setState({
-            gameState: 'game_over',
-            player,
-            stats,
-          });
-          return;
-        }
+          if (player.health <= 0) {
+            soundManager.stopMusic();
+            soundManager.playGameOver();
+            useGameStore.setState({
+              gameState: 'game_over',
+              player,
+              stats,
+            });
+            return;
+          }
 
-        return; // Consumed on player hit
+          return; // Consumed on player hit
+        }
       }
-    }
 
-    activeProjectiles.push(proj);
-  });
+      activeProjectiles.push(proj);
+    });
 
-    // --- 7b. GROUND HAZARDS SIMULATION (Telegraphed Briar Eruptions) ---
+    // --- 7b. GROUND HAZARDS SIMULATION (Telegraphed Briar Eruptions & Lingering Toxic Pools) ---
     const activeGroundHazards: GroundHazardState[] = [];
     groundHazards.forEach((hazard) => {
       if (hazard.mapId !== store.currentMap) return;
 
-      if (!hazard.erupted) {
+      if (hazard.type === 'toxic_patch') {
+        hazard.duration -= dt;
+        if (hazard.duration > 0) {
+          activeGroundHazards.push(hazard);
+
+          // Bubbling toxic spore particles
+          if (Math.random() < 0.28) {
+            activeParticles.push({
+              id: `toxic_bubble_${Date.now()}_${Math.random()}`,
+              type: 'leaf',
+              x: hazard.x + (Math.random() - 0.5) * hazard.radius * 1.6,
+              y: 0.1,
+              z: hazard.z + (Math.random() - 0.5) * hazard.radius * 1.6,
+              vx: (Math.random() - 0.5) * 0.4,
+              vy: 0.8 + Math.random() * 0.9,
+              vz: (Math.random() - 0.5) * 0.4,
+              size: 0.12,
+              color: '#84cc16',
+              life: 0.4,
+              maxLife: 0.4,
+            });
+          }
+
+          // Damage player inside toxic pool and push them away
+          const distToHazard = Math.hypot(player.x - hazard.x, player.z - hazard.z);
+          if (distToHazard < hazard.radius && player.iFrames <= 0) {
+            player.health = Math.max(0, player.health - hazard.damage);
+            player.iFrames = 1.2;
+            damageFlash = 0.75;
+            soundManager.playPlayerHurt();
+
+            // Push player outward from puddle center
+            const dirX = (player.x - hazard.x) / (distToHazard || 0.001);
+            const dirZ = (player.z - hazard.z) / (distToHazard || 0.001);
+            player.vx = dirX * 5.5;
+            player.vz = dirZ * 5.5;
+
+            if (player.health <= 0) {
+              soundManager.stopMusic();
+              soundManager.playGameOver();
+              useGameStore.setState({
+                gameState: 'game_over',
+                player,
+                stats,
+              });
+              return;
+            }
+          }
+        }
+      } else if (!hazard.erupted) {
         hazard.timer -= dt;
         if (hazard.timer <= 0) {
           hazard.erupted = true;

@@ -82,24 +82,38 @@ export const ENEMY_SETTINGS = {
   },
   boss_gorgoth: {
     hp: 10,
-    speed: 3.1,
+    speed: 2.4, // Deliberate, heavier pursuit speed (was 3.1) giving room to maneuver around pillars
     radius: 1.1,
-    damage: 2, // 1 full heart contact damage
+    damage: 1, // 1/2 heart contact damage (was 2 / 1 full heart) - much fairer for the player!
     aggroRadius: 16.0,
     leashRadius: 24.0,
     pursuitDuration: 99.0, // Relentless in boss sanctum
     knockbackForce: 0.4, // Heavy boss - minimal flinch, no stunlock
     poiseDuration: 0.9, // Seconds of hyper-armor where attacks cannot interrupt or push boss
-    projectileSpeed: 6.0, // Units per second for bramble thorn
+    projectileSpeed: 5.5, // Units per second for bramble thorn (was 6.0)
     projectileDamage: 1, // 1/2 heart damage (fair & dodgeable for first boss)
     projectileRadius: 0.28,
-    projectileCooldown: 3.4,
-    projectileWindup: 0.45,
-    groundEruptionWindup: 0.9, // Seconds of telegraphed floor rune before briar spikes erupt
+    projectileCooldown: 5.5, // Cooldown between ranged attacks (was 3.8s) - less ability spam
+    projectileWindup: 1.05, // Seconds of telegraphed aiming reticle before firing (was 0.75s) - more reaction time
+    groundEruptionWindup: 1.1, // Seconds of telegraphed floor rune before briar spikes erupt (was 0.9s)
     groundEruptionDamage: 1,
     groundEruptionRadius: 0.9,
-    sporeStompCooldown: 4.5,
+    sporeStompCooldown: 5.5,
     sporeStompRadius: 2.6,
+    // Lunge Attack Settings
+    lungeWindup: 1.05, // Generous visual telegraph path before lunge dash (was 0.75s)
+    lungeSpeed: 11.0, // Surge velocity during lunge (was 13.5)
+    lungeDistance: 5.0, // Maximum distance covered by lunge (was 5.2)
+    lungeDuration: 0.45, // Active lunge duration in seconds (was 0.38)
+    lungeCooldown: 6.5, // Cooldown between lunges (was 4.8s) - gives player significant breathing room
+    lungeDamage: 1, // 1/2 heart damage on lunge impact (was 2 / 1 full heart)
+    lungeRecovery: 0.85, // Generous vulnerable recovery pause after lunging (was 0.45s) for player counterattacks
+    // Ranged Explosive Spore Bomb & Lingering AoE
+    sporeBombSpeed: 7.2, // Slightly slower bomb flight (was 8.5)
+    sporeBombRadius: 0.38,
+    sporeAoeRadius: 1.4, // Slightly smaller hazard zone (was 1.55)
+    sporeAoeDuration: 3.0, // Shorter lingering hazard pool (was 3.8s)
+    sporeAoeDamage: 1,
   },
 };
 

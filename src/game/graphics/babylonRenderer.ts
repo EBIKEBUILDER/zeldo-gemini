@@ -15,6 +15,7 @@ import {
   TransformNode,
   Matrix,
   AbstractMesh,
+  ShadowGenerator,
 } from '@babylonjs/core';
 import { Vector2D } from '@/types/game';
 
@@ -47,10 +48,13 @@ import {
   createHeartMesh,
   createKeyMesh,
   createBrambleProjectileMesh,
+  createSporeBombProjectileMesh,
+  createToxicPoolMesh,
   createGroundRuneMesh,
   createBriarSpikesMesh,
   createBossArenaRuneMesh,
   createFacetedTree,
+  createRoundFacetedTree,
   createRockMesh,
   createCottageMesh,
   createStonePillar,
@@ -84,13 +88,14 @@ export class BabylonRenderer {
   private breakableMeshes: Map<string, TransformNode> = new Map();
   private pickupMeshes: Map<string, TransformNode> = new Map();
   private projectileMeshes: Map<string, TransformNode> = new Map();
-  private hazardMeshes: Map<string, { rune: TransformNode; spikes: TransformNode }> = new Map();
+  private hazardMeshes: Map<string, { rune?: TransformNode; spikes?: TransformNode; pool?: TransformNode }> = new Map();
   private particleMeshes: Map<string, Mesh> = new Map();
 
   // Props & Merged Terrain
   private gateMesh: TransformNode | null = null;
   private chest: ChestMeshes | null = null;
   private mergedWaterMesh: Mesh | null = null;
+  private shadowGenerator: ShadowGenerator | null = null;
 
   // Flash materials
   private whiteFlashMat: StandardMaterial;
@@ -200,16 +205,24 @@ export class BabylonRenderer {
     this.camera.minZ = 0.5;
     this.camera.maxZ = 85.0;
 
-    // Lighting: Overworld Sun + Ambient
+    // Lighting: Overworld Sun + Ambient with improved two-tone sky/ground bounce and warm sunlight
     this.hemiLight = new HemisphericLight('hemi', new Vector3(0, 1, 0), this.scene);
-    this.hemiLight.diffuse = new Color3(1.0, 1.0, 0.95);
-    this.hemiLight.groundColor = new Color3(0.35, 0.45, 0.32);
-    this.hemiLight.intensity = 0.95;
+    this.hemiLight.diffuse = new Color3(0.72, 0.82, 0.96); // Cool sky ambient from above
+    this.hemiLight.groundColor = new Color3(0.28, 0.40, 0.24); // Warm earthy ground bounce
+    this.hemiLight.intensity = 0.85;
 
-    this.sunLight = new DirectionalLight('sun', new Vector3(0.4, -0.9, 0.3), this.scene);
-    this.sunLight.position = new Vector3(-12, 28, -10);
-    this.sunLight.diffuse = new Color3(1.0, 0.95, 0.85);
-    this.sunLight.intensity = 1.0;
+    this.sunLight = new DirectionalLight('sun', new Vector3(0.42, -0.88, 0.32), this.scene);
+    this.sunLight.position = new Vector3(-10, 32, -8);
+    this.sunLight.diffuse = new Color3(1.0, 0.96, 0.84); // Warm golden sunlight
+    this.sunLight.specular = new Color3(0.22, 0.20, 0.16);
+    this.sunLight.intensity = 1.08;
+    this.sunLight.autoCalcShadowZBounds = true;
+
+    // Real-time soft shadows for depth and grounding
+    this.shadowGenerator = new ShadowGenerator(1024, this.sunLight);
+    this.shadowGenerator.usePoissonSampling = true;
+    this.shadowGenerator.bias = 0.002;
+    this.shadowGenerator.darkness = 0.32;
 
     // Hit flash material
     this.whiteFlashMat = palette.get(
@@ -226,6 +239,11 @@ export class BabylonRenderer {
 
     // Build Hero
     this.hero = createHeroMesh(this.scene);
+    if (this.shadowGenerator) {
+      this.hero.root.getChildMeshes().forEach((m) => {
+        this.shadowGenerator?.addShadowCaster(m, false);
+      });
+    }
 
     // Pre-instantiate all initial entities so shaders are compiled upfront
     this.prepopulateEntities();
@@ -360,6 +378,7 @@ export class BabylonRenderer {
         merged.name = `merged_overworld_${name}`;
         merged.material = mat;
         merged.parent = this.overworldRoot;
+        merged.receiveShadows = true;
         if (!isDynamicWater) {
           merged.freezeWorldMatrix();
         }
@@ -377,11 +396,119 @@ export class BabylonRenderer {
     mergeBatch('cliff', tileGroups.cliff, cliffMat);
     this.mergedWaterMesh = mergeBatch('water', tileGroups.water, waterMat, true);
 
+    // High-frequency ground detail scatter: 3D fanned grass clumps, sparse pebbles, and wildflower blossoms
+    const ambientGrassVibrant: Mesh[] = [];
+    const ambientGrassDeep: Mesh[] = [];
+    const ambientGrassGolden: Mesh[] = [];
+    const pebbleMeshes: Mesh[] = [];
+    const flowerScatterMeshes: Mesh[] = [];
+
+    const pseudoRandom = (seed: number) => {
+      const val = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+      return val - Math.floor(val);
+    };
+
+    for (let x = 1; x < map.width - 1; x++) {
+      for (let z = 1; z < map.height - 1; z++) {
+        const tile = map.tiles[x][z];
+        const isGrass = tile.type === 'grass';
+        const isFlower = tile.type === 'flower';
+        const isDirt = tile.type === 'dirt';
+
+        const rand1 = pseudoRandom(x * 37 + z * 91);
+        const rand2 = pseudoRandom(x * 53 + z * 107);
+        const rand3 = pseudoRandom(x * 79 + z * 131);
+
+        // 1. 3D Fanned Grass Clumps (3 outward-leaning fanned blades with varied heights and colors)
+        if (isGrass || isFlower) {
+          const numClumps = isFlower ? 2 : rand1 > 0.45 ? 1 : 0;
+          for (let t = 0; t < numClumps; t++) {
+            const offsetX = (pseudoRandom(x * 13 + z * 47 + t * 29) - 0.5) * 0.72;
+            const offsetZ = (pseudoRandom(x * 23 + z * 59 + t * 41) - 0.5) * 0.72;
+            const clumpAngle = pseudoRandom(x * 31 + z * 67 + t * 53) * Math.PI * 2;
+            const clumpScale = 0.85 + pseudoRandom(x * 43 + z * 71 + t * 37) * 0.35;
+            const bladeW = 0.26 * clumpScale;
+            const bladeH = 0.28 * clumpScale;
+
+            const targetList =
+              (x + z + t) % 3 === 0
+                ? ambientGrassVibrant
+                : (x + z + t) % 3 === 1
+                ? ambientGrassDeep
+                : ambientGrassGolden;
+
+            // 3 outward-fanned blades forming a full 3D grass clump
+            for (let b = 0; b < 3; b++) {
+              const bAngle = clumpAngle + (b * Math.PI * 2) / 3;
+              const blade = MeshBuilder.CreatePlane(
+                `amb_g_${x}_${z}_${t}_${b}`,
+                { width: bladeW, height: bladeH },
+                this.scene
+              );
+              blade.position.set(
+                x + 0.5 + offsetX + Math.cos(bAngle) * 0.05,
+                bladeH * 0.48,
+                z + 0.5 + offsetZ + Math.sin(bAngle) * 0.05
+              );
+              blade.rotation.y = bAngle;
+              blade.rotation.x = Math.cos(bAngle) * 0.22;
+              blade.rotation.z = Math.sin(bAngle) * 0.22;
+              targetList.push(blade);
+            }
+          }
+        }
+
+        // 2. Tiny faceted low-poly pebbles (reduced to 1/4th frequency, concentrated along path edges)
+        if (rand2 > 0.94 && (isDirt || (isGrass && rand1 > 0.75))) {
+          const pX = x + 0.5 + (rand1 - 0.5) * 0.65;
+          const pZ = z + 0.5 + (rand3 - 0.5) * 0.65;
+          const pRadius = 0.07 + rand1 * 0.05;
+          const pebble = MeshBuilder.CreateIcoSphere(`amb_peb_${x}_${z}`, {
+            radius: pRadius,
+            subdivisions: 1,
+            flat: true,
+          }, this.scene);
+          pebble.position.set(pX, pRadius * 0.45, pZ);
+          pebble.scaling.set(1.15, 0.55, 0.95);
+          pebble.rotation.set(rand1 * 2, rand2 * 3, rand3 * 2);
+          pebbleMeshes.push(pebble);
+        }
+
+        // 3. Tiny wildflower blossoms in meadows and flower clearings
+        if (isFlower || (isGrass && rand3 > 0.86)) {
+          const fX = x + 0.5 + (rand2 - 0.5) * 0.68;
+          const fZ = z + 0.5 + (rand1 - 0.5) * 0.68;
+          const flower = MeshBuilder.CreateDisc(`amb_fl_${x}_${z}`, {
+            radius: 0.12,
+            tessellation: 5,
+          }, this.scene);
+          flower.rotation.x = Math.PI / 2;
+          flower.position.set(fX, 0.04, fZ);
+          flowerScatterMeshes.push(flower);
+        }
+      }
+    }
+
+    const ambGrassMatVibrant = palette.get(this.scene, 'amb_grass_vibrant', new Color3(0.24, 0.70, 0.28), new Color3(0.02, 0.02, 0.02));
+    const ambGrassMatDeep = palette.get(this.scene, 'amb_grass_deep', new Color3(0.16, 0.54, 0.20), new Color3(0.02, 0.02, 0.02));
+    const ambGrassMatGolden = palette.get(this.scene, 'amb_grass_golden', new Color3(0.36, 0.74, 0.22), new Color3(0.02, 0.02, 0.02));
+
+    const pebbleMat = palette.get(this.scene, 'amb_pebble_mat', new Color3(0.58, 0.55, 0.50), new Color3(0.05, 0.05, 0.05));
+    const ambFlowerMat = palette.get(this.scene, 'amb_flower_mat', new Color3(0.96, 0.84, 0.22), new Color3(0.1, 0.1, 0.1));
+
+    mergeBatch('ambient_grass_vibrant', ambientGrassVibrant, ambGrassMatVibrant);
+    mergeBatch('ambient_grass_deep', ambientGrassDeep, ambGrassMatDeep);
+    mergeBatch('ambient_grass_golden', ambientGrassGolden, ambGrassMatGolden);
+    mergeBatch('ambient_pebbles', pebbleMeshes, pebbleMat);
+    mergeBatch('ambient_flowers', flowerScatterMeshes, ambFlowerMat);
+
     // Overworld Props
     map.props.forEach((prop) => {
       let node: TransformNode | null = null;
       if (prop.type === 'tree') {
-        node = createFacetedTree(this.scene);
+        node = prop.variant === 'round'
+          ? createRoundFacetedTree(this.scene)
+          : createFacetedTree(this.scene);
         if (prop.scaleX) node.scaling.set(prop.scaleX, prop.scaleY || 1, prop.scaleZ || 1);
         if (prop.rotationY) node.rotation.y = prop.rotationY;
       } else if (prop.type === 'rock') {
@@ -424,7 +551,17 @@ export class BabylonRenderer {
         node.getChildMeshes().forEach((m) => {
           m.freezeWorldMatrix();
           m.cullingStrategy = AbstractMesh.CULLINGSTRATEGY_BOUNDINGSPHERE_ONLY;
+          if (this.shadowGenerator && prop.type !== 'well') {
+            const isFoliage = m.name.includes('foliage') || m.name.includes('upper') || m.name.includes('lower');
+            const isRockOrBuilding = prop.type === 'rock' || prop.type === 'house' || prop.type === 'pillar';
+            if (isFoliage || isRockOrBuilding) {
+              this.shadowGenerator.addShadowCaster(m, false);
+            }
+          }
         });
+        if (node instanceof Mesh && this.shadowGenerator) {
+          this.shadowGenerator.addShadowCaster(node, false);
+        }
       }
     });
   }
@@ -540,13 +677,20 @@ export class BabylonRenderer {
     this.overworldRoot.setEnabled(!isDungeon);
     this.dungeonRoot.setEnabled(isDungeon);
 
-    // Adjust lighting for current map
+    // Adjust lighting and shadows for current map
     if (isDungeon) {
       this.hemiLight.intensity = 0.35;
       this.sunLight.intensity = 0.2;
+      if (this.shadowGenerator) this.shadowGenerator.darkness = 0.12;
     } else {
       this.hemiLight.intensity = 0.85;
-      this.sunLight.intensity = 1.1;
+      this.sunLight.intensity = 1.08;
+      if (this.shadowGenerator) this.shadowGenerator.darkness = 0.32;
+    }
+
+    // Dynamic directional sun position follows active player for maximum shadow map resolution
+    if (this.sunLight && !isDungeon) {
+      this.sunLight.position.set(store.player.x - 12, 32, store.player.z - 10);
     }
 
     // 2. Camera follow player with lerp and screen shake
@@ -616,6 +760,11 @@ export class BabylonRenderer {
       if (!meshes) {
         meshes = createEnemyMesh(this.scene, enemy.type);
         this.enemyMeshes.set(enemy.id, meshes);
+        if (this.shadowGenerator) {
+          meshes.root.getChildMeshes().forEach((child) => {
+            this.shadowGenerator?.addShadowCaster(child, false);
+          });
+        }
       }
 
       const isVisible = enemy.mapId === store.currentMap && !enemy.isDead;
@@ -639,7 +788,9 @@ export class BabylonRenderer {
           // Boss Telegraphed Attack Animations
           const isTelegraphing =
             !!(enemy.castTimer && enemy.castTimer > 0) ||
-            !!(enemy.bossTelegraphTimer && enemy.bossTelegraphTimer > 0);
+            !!(enemy.bossTelegraphTimer && enemy.bossTelegraphTimer > 0) ||
+            enemy.bossAction === 'telegraphing_lunge' ||
+            enemy.bossAction === 'telegraphing_ranged';
 
           // 1. Mario RPG Floating '!' Telegraph Exclamation Bubble
           if (meshes.exclamationBubble) {
@@ -651,9 +802,10 @@ export class BabylonRenderer {
             }
           }
 
-          // 2. Glowing Bramble Core Gem: rapid pulse when charging
+          // 2. Glowing Bramble Core Gem: rapid pulse when charging or lunging
           if (meshes.coreGem) {
-            const gemPulse = isTelegraphing
+            const isChargingOrLunging = isTelegraphing || enemy.bossAction === 'lunging';
+            const gemPulse = isChargingOrLunging
               ? 1.0 + Math.sin(nowTime * 0.04) * 0.38
               : 1.0 + Math.sin(nowTime * 0.005) * 0.12;
             meshes.coreGem.scaling.set(gemPulse, gemPulse * 1.3, gemPulse * 0.7);
@@ -669,8 +821,42 @@ export class BabylonRenderer {
             }
           }
 
-          // 4. Boss Body Squash-and-Stretch Anticipation
-          if (isTelegraphing) {
+          // 3b. Ground Lunge Path Telegraph (Visual corridor for lunge attack)
+          if (meshes.lungePath) {
+            const isLungeTelegraph = enemy.bossAction === 'telegraphing_lunge';
+            meshes.lungePath.setEnabled(isLungeTelegraph);
+            if (isLungeTelegraph && enemy.lungeDirection) {
+              const lungeDist = enemy.lungeDistance || 5.2;
+              meshes.lungePath.position.set(enemy.x, 0.035, enemy.z);
+              meshes.lungePath.rotation.y = Math.atan2(enemy.lungeDirection.x, enemy.lungeDirection.z);
+              const pProgress = 1.0 - Math.max(0, (enemy.bossTelegraphTimer || 0) / (enemy.bossTelegraphMax || 0.75));
+              const pulseX = 1.0 + Math.sin(pProgress * Math.PI * 6) * 0.08;
+              meshes.lungePath.scaling.set(pulseX, 1.0, lungeDist);
+            }
+          }
+
+          // 3c. Ground Ranged Bomb Landing Reticle (Visual telegraph for ranged attack)
+          if (meshes.rangedReticle) {
+            const isRangedTelegraph = enemy.bossAction === 'telegraphing_ranged';
+            meshes.rangedReticle.setEnabled(isRangedTelegraph);
+            if (isRangedTelegraph && enemy.bossTelegraphTarget) {
+              meshes.rangedReticle.position.set(enemy.bossTelegraphTarget.x, 0.04, enemy.bossTelegraphTarget.z);
+              const pProgress = 1.0 - Math.max(0, (enemy.bossTelegraphTimer || 0) / (enemy.bossTelegraphMax || 0.75));
+              const pulse = 1.0 + Math.sin(pProgress * Math.PI * 6) * 0.12;
+              meshes.rangedReticle.scaling.set(pulse, 1.0, pulse);
+              meshes.rangedReticle.rotation.y += 0.05;
+            }
+          }
+
+          // 4. Boss Body Squash-and-Stretch Anticipation & Motion
+          if (enemy.bossAction === 'lunging') {
+            // Aerodynamic forward thrust elongation
+            meshes.body.scaling.set(0.9, 0.9, 1.45);
+          } else if (enemy.bossAction === 'lunge_recovery') {
+            // Heavy exhausted recovery breathing squash
+            const recoverSin = Math.sin(nowTime * 0.015);
+            meshes.body.scaling.set(1.25 + recoverSin * 0.08, 0.75 - recoverSin * 0.08, 1.25 + recoverSin * 0.08);
+          } else if (isTelegraphing) {
             // Squashes down into the floor while charging up
             meshes.body.scaling.set(1.28, 0.72, 1.28);
           } else {
@@ -692,6 +878,9 @@ export class BabylonRenderer {
             meshes.antenna.rotation.z = Math.sin(enemy.hopCycle * 0.8) * 0.22;
           }
         }
+      } else {
+        meshes.lungePath?.setEnabled(false);
+        meshes.rangedReticle?.setEnabled(false);
       }
     });
 
@@ -752,7 +941,12 @@ export class BabylonRenderer {
 
     // 7. Update Dungeon Gate Position
     if (this.gateMesh) {
-      this.gateMesh.position.y = store.quest.gateOpenProgress * 2.8;
+      if (store.quest.gateOpenProgress >= 0.99) {
+        this.gateMesh.setEnabled(false);
+      } else {
+        this.gateMesh.setEnabled(true);
+        this.gateMesh.position.y = store.quest.gateOpenProgress * 5.5;
+      }
     }
 
     // 8. Update Golden Treasure Chest
@@ -805,7 +999,9 @@ export class BabylonRenderer {
     store.projectiles.forEach((p) => {
       let mesh = this.projectileMeshes.get(p.id);
       if (!mesh) {
-        mesh = createBrambleProjectileMesh(this.scene);
+        mesh = p.type === 'spore_bomb'
+          ? createSporeBombProjectileMesh(this.scene)
+          : createBrambleProjectileMesh(this.scene);
         this.projectileMeshes.set(p.id, mesh);
       }
 
@@ -813,18 +1009,26 @@ export class BabylonRenderer {
       mesh.setEnabled(isVisible);
       if (isVisible) {
         mesh.position.set(p.x, 0.55, p.z);
-        mesh.rotation.y += 0.12;
-        mesh.rotation.x += 0.08;
+        if (p.type === 'spore_bomb') {
+          mesh.rotation.y += 0.18;
+          mesh.rotation.x += 0.14;
+          const pulse = 1.0 + Math.sin(nowTime * 0.02) * 0.12;
+          mesh.scaling.set(pulse, pulse, pulse);
+        } else {
+          mesh.rotation.y += 0.12;
+          mesh.rotation.x += 0.08;
+        }
       }
     });
 
-    // 12. Update Ground Hazards (Telegraphed Briar Eruptions)
+    // 12. Update Ground Hazards (Telegraphed Briar Eruptions & Lingering Toxic Pools)
     const activeHazardIds = new Set((store.groundHazards || []).map((h) => h.id));
 
     this.hazardMeshes.forEach((nodes, id) => {
       if (!activeHazardIds.has(id)) {
-        nodes.rune.dispose();
-        nodes.spikes.dispose();
+        nodes.rune?.dispose();
+        nodes.spikes?.dispose();
+        nodes.pool?.dispose();
         this.hazardMeshes.delete(id);
       }
     });
@@ -832,28 +1036,43 @@ export class BabylonRenderer {
     (store.groundHazards || []).forEach((h) => {
       let nodes = this.hazardMeshes.get(h.id);
       if (!nodes) {
-        const rune = createGroundRuneMesh(this.scene);
-        const spikes = createBriarSpikesMesh(this.scene);
-        nodes = { rune, spikes };
+        if (h.type === 'toxic_patch') {
+          const pool = createToxicPoolMesh(this.scene);
+          nodes = { pool };
+        } else {
+          const rune = createGroundRuneMesh(this.scene);
+          const spikes = createBriarSpikesMesh(this.scene);
+          nodes = { rune, spikes };
+        }
         this.hazardMeshes.set(h.id, nodes);
       }
 
       const isVisible = h.mapId === store.currentMap;
-      nodes.rune.setEnabled(isVisible && !h.erupted);
-      nodes.spikes.setEnabled(isVisible && h.erupted);
+      if (nodes.pool) {
+        nodes.pool.setEnabled(isVisible);
+        if (isVisible) {
+          nodes.pool.position.set(h.x, 0.035, h.z);
+          const ripple = 1.0 + Math.sin(nowTime * 0.008) * 0.04;
+          nodes.pool.scaling.set(ripple, 1.0, ripple);
+          nodes.pool.rotation.y += 0.008;
+        }
+      } else if (nodes.rune && nodes.spikes) {
+        nodes.rune.setEnabled(isVisible && !h.erupted);
+        nodes.spikes.setEnabled(isVisible && h.erupted);
 
-      if (isVisible) {
-        if (!h.erupted) {
-          nodes.rune.position.set(h.x, 0.04, h.z);
-          const progress = 1.0 - Math.max(0, h.timer / (h.maxTimer || 0.9));
-          const runeScale = 0.9 + Math.sin(progress * Math.PI * 4) * 0.12;
-          nodes.rune.scaling.set(runeScale, 1.0, runeScale);
-          nodes.rune.rotation.y += 0.04;
-        } else {
-          nodes.spikes.position.set(h.x, 0, h.z);
-          const lifeProgress = 1.0 - Math.max(0, h.duration / 0.85);
-          const spikeY = lifeProgress < 0.2 ? lifeProgress * 5.0 : Math.max(0, 1.0 - (lifeProgress - 0.2) * 1.25);
-          nodes.spikes.scaling.set(1.0, spikeY, 1.0);
+        if (isVisible) {
+          if (!h.erupted) {
+            nodes.rune.position.set(h.x, 0.04, h.z);
+            const progress = 1.0 - Math.max(0, h.timer / (h.maxTimer || 0.9));
+            const runeScale = 0.9 + Math.sin(progress * Math.PI * 4) * 0.12;
+            nodes.rune.scaling.set(runeScale, 1.0, runeScale);
+            nodes.rune.rotation.y += 0.04;
+          } else {
+            nodes.spikes.position.set(h.x, 0, h.z);
+            const lifeProgress = 1.0 - Math.max(0, h.duration / 0.85);
+            const spikeY = lifeProgress < 0.2 ? lifeProgress * 5.0 : Math.max(0, 1.0 - (lifeProgress - 0.2) * 1.25);
+            nodes.spikes.scaling.set(1.0, spikeY, 1.0);
+          }
         }
       }
     });
@@ -908,6 +1127,10 @@ export class BabylonRenderer {
 
   public dispose() {
     this.isDisposed = true;
+    if (this.shadowGenerator) {
+      this.shadowGenerator.dispose();
+      this.shadowGenerator = null;
+    }
     if (this.instrumentation) {
       this.instrumentation.dispose();
       this.instrumentation = null;
@@ -916,9 +1139,16 @@ export class BabylonRenderer {
     palette.clear();
     this.projectileMeshes.forEach((m) => m.dispose());
     this.projectileMeshes.clear();
+    this.enemyMeshes.forEach((m) => {
+      m.lungePath?.dispose();
+      m.rangedReticle?.dispose();
+      m.root.dispose();
+    });
+    this.enemyMeshes.clear();
     this.hazardMeshes.forEach((nodes) => {
-      nodes.rune.dispose();
-      nodes.spikes.dispose();
+      nodes.rune?.dispose();
+      nodes.spikes?.dispose();
+      nodes.pool?.dispose();
     });
     this.hazardMeshes.clear();
     this.scene.dispose();

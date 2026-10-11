@@ -26,6 +26,7 @@ export interface WorldProp {
   scaleZ?: number;
   rotationY?: number;
   radius: number; // collision radius (0 if non-colliding like wall torch)
+  variant?: 'pine' | 'round';
 }
 
 export interface MapData {
@@ -191,6 +192,7 @@ export function generateOverworld(): MapData {
     props.push({
       id: `tree_${idx}`,
       type: 'tree',
+      variant: idx % 2 === 0 ? 'pine' : 'round',
       x: tx,
       z: tz,
       scaleX: scale,
@@ -201,19 +203,14 @@ export function generateOverworld(): MapData {
     });
   });
 
-  // Rocks around crags, river, and clearings (irregular low poly)
+  // Rocks around crags, river, and clearings (reduced to half for cleaner environmental composition)
   const rockPositions: [number, number, number, number, number][] = [
     // x, z, scaleX, scaleY, scaleZ
-    [12.0, 2.0, 0.9, 0.7, 1.1],
-    [15.0, 6.8, 0.7, 0.6, 0.8],
+    [15.0, 6.8, 0.8, 0.65, 0.9],
     [35.0, 8.0, 1.2, 0.8, 1.0],
-    [39.5, 7.5, 1.0, 0.9, 1.1],
     [40.0, 12.0, 1.1, 0.8, 1.3],
-    [2.5, 14.0, 1.4, 1.1, 1.2],
     [7.0, 19.5, 1.3, 0.9, 1.4],
-    [12.5, 18.0, 1.0, 0.8, 1.1],
-    [34.0, 20.0, 1.5, 1.2, 1.4],
-    [44.5, 20.0, 1.6, 1.3, 1.5],
+    [44.5, 20.0, 1.5, 1.2, 1.4],
   ];
 
   rockPositions.forEach(([rx, rz, sx, sy, sz], idx) => {
@@ -464,13 +461,12 @@ export function generateDungeon(): MapData {
     },
   ];
 
-  // Enemies: 2 Antechamber Guardian Slimes + Boss Gorgoth in Boss Chamber
+  // Enemies: 1 Antechamber Guardian Slime + Boss Gorgoth in Boss Chamber
   const initialEnemies: EnemyState[] = [];
 
-  // Antechamber guardians
+  // Antechamber guardian (single guardian slime at entryway to boss sanctum)
   const guardianSpawns: [number, number][] = [
-    [7.5, 8.5],
-    [12.0, 8.5],
+    [10.0, 8.5],
   ];
   guardianSpawns.forEach(([gx, gz], idx) => {
     const s = ENEMY_SETTINGS.slime_red;

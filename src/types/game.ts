@@ -119,16 +119,30 @@ export interface EnemyState {
   steeringBiasTimer?: number;
   fallbackPacingTimer?: number;
   fallbackPacingDir?: number;
-  bossAction?: 'none' | 'telegraphing_ricochet' | 'telegraphing_eruption' | 'spore_burst';
-  bossAttackType?: 'ricochet_volley' | 'ground_eruption' | 'spore_burst';
+  bossAction?:
+    | 'none'
+    | 'telegraphing_ricochet'
+    | 'telegraphing_eruption'
+    | 'spore_burst'
+    | 'telegraphing_lunge'
+    | 'lunging'
+    | 'lunge_recovery'
+    | 'telegraphing_ranged';
+  bossAttackType?: 'ricochet_volley' | 'ground_eruption' | 'spore_burst' | 'lunge' | 'spore_bomb';
   bossTelegraphTimer?: number;
   bossTelegraphMax?: number;
   bossTelegraphTarget?: Vector2D;
+  lungeTimer?: number;
+  lungeCooldown?: number;
+  lungeRecoveryTimer?: number;
+  lungeDirection?: Vector2D;
+  lungeDistance?: number;
+  lungeTarget?: Vector2D;
 }
 
 export interface GroundHazardState {
   id: string;
-  type: 'briar_eruption';
+  type: 'briar_eruption' | 'toxic_patch';
   x: number;
   z: number;
   radius: number;
@@ -142,6 +156,7 @@ export interface GroundHazardState {
 
 export interface ProjectileState {
   id: string;
+  type?: 'thorn' | 'spore_bomb';
   x: number;
   z: number;
   vx: number;
@@ -155,6 +170,8 @@ export interface ProjectileState {
   mapId: MapId;
   bounces?: number;
   maxBounces?: number;
+  targetX?: number;
+  targetZ?: number;
 }
 
 export type BreakableType = 'grass' | 'pot';

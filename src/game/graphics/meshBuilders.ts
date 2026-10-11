@@ -6,6 +6,7 @@ import {
   Color3,
   TransformNode,
   AbstractMesh,
+  VertexData,
 } from '@babylonjs/core';
 
 // Cache materials to avoid redundant shader compilation
@@ -178,6 +179,8 @@ export interface EnemyMeshes {
   eyebrows?: Mesh[];
   antenna?: TransformNode;
   pauldrons?: TransformNode[];
+  lungePath?: TransformNode;
+  rangedReticle?: TransformNode;
 }
 
 export function createEnemyMesh(
@@ -256,6 +259,8 @@ export function createEnemyMesh(
   let eyebrows: Mesh[] = [];
   let antenna: TransformNode | undefined;
   let pauldrons: TransformNode[] = [];
+  let lungePath: TransformNode | undefined;
+  let rangedReticle: TransformNode | undefined;
   let defaultMat: StandardMaterial;
 
   if (type === 'boss_gorgoth') {
@@ -396,6 +401,14 @@ export function createEnemyMesh(
     telegraphRing.position.set(0, 0.08, 0);
     telegraphRing.parent = root;
     telegraphRing.setEnabled(false);
+
+    // 8. Ground Lunge Attack Telegraph Path
+    lungePath = createLungeTelegraphMesh(scene);
+    lungePath.setEnabled(false);
+
+    // 9. Ground Ranged Bomb Landing Reticle
+    rangedReticle = createRangedReticleMesh(scene);
+    rangedReticle.setEnabled(false);
   } else {
     // Slimes (Green / Red) - Mario RPG Toy Aesthetics: Smooth rounded jelly blob
     defaultMat = type === 'slime_red' ? redMat : greenMat;
@@ -487,6 +500,8 @@ export function createEnemyMesh(
     eyebrows,
     antenna,
     pauldrons,
+    lungePath,
+    rangedReticle,
   };
 }
 
@@ -844,51 +859,199 @@ export function createBossArenaRuneMesh(scene: Scene): TransformNode {
   return root;
 }
 
-// 5. WORLD PROPS (Mario RPG Puffy Trees, Rocks, Cottage, Well, Gate, Pedestal, Chest)
+// Helper to build a spiky star-cone foliage tier with faceted needle branches
+function createSpikyFoliageTier(
+  name: string,
+  points: number,
+  rOuter: number,
+  rInner: number,
+  height: number,
+  yOffset: number,
+  droop: number,
+  rotY: number,
+  scene: Scene
+): Mesh {
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  // Top apex point
+  const apexIdx = 0;
+  positions.push(0, height, 0);
+
+  // Bottom center point (recessed inside so underside is concave)
+  const bottomCenterIdx = 1;
+  positions.push(0, droop * 0.45, 0);
+
+  // Base perimeter vertices (alternating outer sharp tips and inner valleys)
+  const numPerim = points * 2;
+  const perimStartIdx = 2;
+
+  for (let i = 0; i < numPerim; i++) {
+    const angle = (i * Math.PI * 2) / numPerim;
+    const isTip = i % 2 === 0;
+    const r = isTip ? rOuter : rInner;
+    const y = isTip ? 0 : droop;
+    const x = Math.cos(angle) * r;
+    const z = Math.sin(angle) * r;
+    positions.push(x, y, z);
+  }
+
+  // Side faces: apex to base perimeter
+  for (let i = 0; i < numPerim; i++) {
+    const next = (i + 1) % numPerim;
+    indices.push(apexIdx, perimStartIdx + i, perimStartIdx + next);
+  }
+
+  // Underside faces: base perimeter to bottom center
+  for (let i = 0; i < numPerim; i++) {
+    const next = (i + 1) % numPerim;
+    indices.push(bottomCenterIdx, perimStartIdx + next, perimStartIdx + i);
+  }
+
+  const normals: number[] = [];
+  VertexData.ComputeNormals(positions, indices, normals);
+
+  const vd = new VertexData();
+  vd.positions = positions;
+  vd.indices = indices;
+  vd.normals = normals;
+
+  const mesh = new Mesh(name, scene);
+  vd.applyToMesh(mesh);
+  mesh.position.y = yOffset;
+  mesh.rotation.y = rotY;
+  return mesh;
+}
+
+// 5. WORLD PROPS (Spiky Low-Poly Pine Trees, Rocks, Cottage, Well, Gate, Pedestal, Chest)
 export function createFacetedTree(scene: Scene): TransformNode {
   const root = new TransformNode('tree_root', scene);
-  const trunkMat = palette.get(scene, 'tree_trunk', new Color3(0.44, 0.28, 0.16));
-  const foliageMat1 = palette.get(scene, 'tree_foliage_1', new Color3(0.18, 0.58, 0.25), new Color3(0.2, 0.4, 0.2));
-  const foliageMat2 = palette.get(scene, 'tree_foliage_2', new Color3(0.24, 0.68, 0.3), new Color3(0.25, 0.45, 0.25));
+  const trunkMat = palette.get(scene, 'tree_trunk', new Color3(0.42, 0.26, 0.15), new Color3(0.05, 0.05, 0.05));
+  const foliageMat1 = palette.get(scene, 'tree_foliage_1', new Color3(0.16, 0.52, 0.22), new Color3(0.08, 0.12, 0.08));
+  const foliageMat2 = palette.get(scene, 'tree_foliage_2', new Color3(0.24, 0.66, 0.30), new Color3(0.08, 0.12, 0.08));
 
-  // Sturdy Mario RPG style cylindrical trunk
+  // Sturdy low-poly faceted hexagonal trunk
   const trunk = MeshBuilder.CreateCylinder('trunk', {
-    diameterTop: 0.42,
-    diameterBottom: 0.58,
+    diameterTop: 0.38,
+    diameterBottom: 0.54,
     height: 1.1,
-    tessellation: 8,
+    tessellation: 6,
   }, scene);
   trunk.material = trunkMat;
   trunk.position.y = 0.55;
+  trunk.convertToFlatShadedMesh();
   trunk.parent = root;
 
-  // Mario RPG Puffy Cloud-Dome Foliage (3 stacked rounded puffy crowns with rich green gradient)
-  const dome1 = MeshBuilder.CreateSphere('foliage_dome1', {
-    diameter: 1.85,
-    segments: 5,
-  }, scene);
-  dome1.material = foliageMat1;
-  dome1.scaling.set(1.1, 0.85, 1.1);
-  dome1.position.set(0, 1.45, 0);
-  dome1.parent = root;
+  // Tier 1 (bottom wide skirt with 7 sharp drooping needle tips)
+  const tier1 = createSpikyFoliageTier('tier1', 7, 1.25, 0.72, 1.25, 0.92, 0.28, 0, scene);
 
-  const dome2 = MeshBuilder.CreateSphere('foliage_dome2', {
-    diameter: 1.45,
-    segments: 5,
-  }, scene);
-  dome2.scaling.set(1.05, 0.9, 1.05);
-  dome2.position.set(0.08, 2.15, -0.05);
+  // Tier 2 (lower-mid tier rotated to interleave needle spikes between tier 1)
+  const tier2 = createSpikyFoliageTier('tier2', 7, 1.02, 0.60, 1.15, 1.55, 0.24, Math.PI / 7, scene);
 
-  const dome3 = MeshBuilder.CreateSphere('foliage_dome3', {
-    diameter: 0.95,
-    segments: 4,
-  }, scene);
-  dome3.scaling.set(1.0, 0.95, 1.0);
-  dome3.position.set(-0.06, 2.7, 0.04);
+  // Lower foliage merged for optimal draw call batching with flat low-poly shading
+  const lowerFoliage = Mesh.MergeMeshes([tier1, tier2], true, true, undefined, false, false);
+  if (lowerFoliage) {
+    lowerFoliage.material = foliageMat1;
+    lowerFoliage.convertToFlatShadedMesh();
+    lowerFoliage.parent = root;
+  }
 
-  const upperFoliage = Mesh.MergeMeshes([dome2, dome3], true, true, undefined, false, false);
+  // Tier 3 (upper-mid tier)
+  const tier3 = createSpikyFoliageTier('tier3', 6, 0.78, 0.46, 1.05, 2.15, 0.20, Math.PI / 4, scene);
+
+  // Tier 4 (sharp crowning needle spire tapering to a pointed needle tip)
+  const tier4 = createSpikyFoliageTier('tier4', 5, 0.52, 0.28, 1.10, 2.70, 0.16, 0.35, scene);
+
+  // Upper foliage merged with vibrant pine green gradient
+  const upperFoliage = Mesh.MergeMeshes([tier3, tier4], true, true, undefined, false, false);
   if (upperFoliage) {
     upperFoliage.material = foliageMat2;
+    upperFoliage.convertToFlatShadedMesh();
+    upperFoliage.parent = root;
+  }
+
+  return root;
+}
+
+// Low-poly round deciduous tree with faceted icosphere foliage lobes and subtle leaf spikes
+export function createRoundFacetedTree(scene: Scene): TransformNode {
+  const root = new TransformNode('tree_round_root', scene);
+  const trunkMat = palette.get(scene, 'tree_trunk', new Color3(0.42, 0.26, 0.15), new Color3(0.05, 0.05, 0.05));
+  const foliageMat1 = palette.get(scene, 'tree_round_foliage_1', new Color3(0.20, 0.58, 0.26), new Color3(0.06, 0.10, 0.06));
+  const foliageMat2 = palette.get(scene, 'tree_round_foliage_2', new Color3(0.28, 0.68, 0.32), new Color3(0.06, 0.10, 0.06));
+
+  // Sturdy low-poly trunk
+  const trunk = MeshBuilder.CreateCylinder('r_trunk', {
+    diameterTop: 0.38,
+    diameterBottom: 0.56,
+    height: 1.35,
+    tessellation: 6,
+  }, scene);
+  trunk.position.y = 0.67;
+
+  // Left & right supporting branch knuckles
+  const b1 = MeshBuilder.CreateCylinder('r_b1', { diameterTop: 0.18, diameterBottom: 0.26, height: 0.62, tessellation: 5 }, scene);
+  b1.position.set(-0.26, 1.25, 0.12);
+  b1.rotation.set(0.12, 0, 0.52);
+
+  const b2 = MeshBuilder.CreateCylinder('r_b2', { diameterTop: 0.18, diameterBottom: 0.26, height: 0.58, tessellation: 5 }, scene);
+  b2.position.set(0.26, 1.22, -0.10);
+  b2.rotation.set(-0.12, 0, -0.48);
+
+  const fullTrunk = Mesh.MergeMeshes([trunk, b1, b2], true, true, undefined, false, false);
+  if (fullTrunk) {
+    fullTrunk.material = trunkMat;
+    fullTrunk.convertToFlatShadedMesh();
+    fullTrunk.parent = root;
+  }
+
+  // Low-poly faceted icosphere foliage lobes (subdivisions: 1 gives 20 crisp triangular facets)
+  const p1 = MeshBuilder.CreateIcoSphere('r_p1', { radius: 1.12, subdivisions: 1, flat: true }, scene);
+  p1.position.set(0, 2.05, 0);
+  p1.scaling.set(1.05, 0.94, 1.05);
+
+  const p2 = MeshBuilder.CreateIcoSphere('r_p2', { radius: 0.88, subdivisions: 1, flat: true }, scene);
+  p2.position.set(-0.64, 1.85, 0.26);
+  p2.rotation.y = 0.45;
+
+  const p3 = MeshBuilder.CreateIcoSphere('r_p3', { radius: 0.84, subdivisions: 1, flat: true }, scene);
+  p3.position.set(0.62, 1.80, -0.24);
+  p3.rotation.y = 1.15;
+
+  const p4 = MeshBuilder.CreateIcoSphere('r_p4', { radius: 0.78, subdivisions: 1, flat: true }, scene);
+  p4.position.set(-0.25, 1.95, -0.58);
+  p4.rotation.y = 2.1;
+
+  // Subtle leafy branch tuft spikes projecting softly from the lobes
+  const leafTufts: Mesh[] = [];
+  const tuftCoords = [
+    [-1.25, 1.82, 0.35, 0, 0, Math.PI / 3],
+    [1.22, 1.78, -0.32, 0, 0, -Math.PI / 3],
+    [-0.32, 1.95, -1.15, -Math.PI / 3, 0, 0],
+    [0.15, 3.25, 0.08, 0, 0, 0],
+  ];
+  tuftCoords.forEach(([tx, ty, tz, rx, ry, rz], i) => {
+    const tuft = MeshBuilder.CreateCylinder(`r_tuft_${i}`, { diameterTop: 0.02, diameterBottom: 0.38, height: 0.42, tessellation: 4 }, scene);
+    tuft.position.set(tx, ty, tz);
+    tuft.rotation.set(rx, ry, rz);
+    leafTufts.push(tuft);
+  });
+
+  const p5 = MeshBuilder.CreateIcoSphere('r_p5', { radius: 0.76, subdivisions: 1, flat: true }, scene);
+  p5.position.set(0.06, 2.72, 0.05);
+  p5.rotation.y = 0.85;
+
+  const lowerFoliage = Mesh.MergeMeshes([p1, p2, p3, p4, leafTufts[0], leafTufts[1], leafTufts[2]], true, true, undefined, false, false);
+  if (lowerFoliage) {
+    lowerFoliage.material = foliageMat1;
+    lowerFoliage.convertToFlatShadedMesh();
+    lowerFoliage.parent = root;
+  }
+
+  const upperFoliage = Mesh.MergeMeshes([p5, leafTufts[3]], true, true, undefined, false, false);
+  if (upperFoliage) {
+    upperFoliage.material = foliageMat2;
+    upperFoliage.convertToFlatShadedMesh();
     upperFoliage.parent = root;
   }
 
@@ -1081,4 +1244,295 @@ export function createTreasureChest(scene: Scene): ChestMeshes {
   lock.parent = root;
 
   return { root, body, lid, lidMesh };
+}
+
+// 6. BOSS TELEGRAPHS & RANGED HAZARDS
+export function createLungeTelegraphMesh(scene: Scene): TransformNode {
+  const root = new TransformNode(`lunge_telegraph_${Date.now()}_${Math.random()}`, scene);
+
+  const pathMat = palette.get(
+    scene,
+    'boss_lunge_path_mat',
+    new Color3(0.92, 0.15, 0.12),
+    new Color3(1.0, 0.45, 0.3),
+    new Color3(0.85, 0.1, 0.08)
+  );
+  pathMat.alpha = 0.52;
+
+  const railMat = palette.get(
+    scene,
+    'boss_lunge_rail_mat',
+    new Color3(1.0, 0.35, 0.15),
+    new Color3(1.0, 0.85, 0.5),
+    new Color3(1.0, 0.25, 0.1)
+  );
+  railMat.alpha = 0.88;
+
+  // Main danger zone ground strip (width: 2.2 matches boss diameter; depth: 1.0 extends forward from root at z=0 to z=1)
+  const corridor = MeshBuilder.CreateBox('lunge_corridor', {
+    width: 2.2,
+    height: 0.03,
+    depth: 1.0,
+  }, scene);
+  corridor.material = pathMat;
+  corridor.position.set(0, 0.035, 0.5);
+  corridor.parent = root;
+
+  // Left rail
+  const railL = MeshBuilder.CreateBox('rail_l', {
+    width: 0.1,
+    height: 0.05,
+    depth: 1.0,
+  }, scene);
+  railL.material = railMat;
+  railL.position.set(-1.08, 0.045, 0.5);
+  railL.parent = root;
+
+  // Right rail
+  const railR = MeshBuilder.CreateBox('rail_r', {
+    width: 0.1,
+    height: 0.05,
+    depth: 1.0,
+  }, scene);
+  railR.material = railMat;
+  railR.position.set(1.08, 0.045, 0.5);
+  railR.parent = root;
+
+  // Center dashed warning line
+  for (let i = 0; i < 4; i++) {
+    const dash = MeshBuilder.CreateBox(`rail_dash_${i}`, {
+      width: 0.14,
+      height: 0.04,
+      depth: 0.12,
+    }, scene);
+    dash.material = railMat;
+    dash.position.set(0, 0.042, 0.15 + i * 0.24);
+    dash.parent = root;
+  }
+
+  // Terminal chevron arrow head pointing forward
+  const arrowL = MeshBuilder.CreateBox('arrow_l', {
+    width: 0.12,
+    height: 0.05,
+    depth: 0.45,
+  }, scene);
+  arrowL.material = railMat;
+  arrowL.position.set(-0.35, 0.045, 0.88);
+  arrowL.rotation.y = Math.PI / 4;
+  arrowL.parent = root;
+
+  const arrowR = MeshBuilder.CreateBox('arrow_r', {
+    width: 0.12,
+    height: 0.05,
+    depth: 0.45,
+  }, scene);
+  arrowR.material = railMat;
+  arrowR.position.set(0.35, 0.045, 0.88);
+  arrowR.rotation.y = -Math.PI / 4;
+  arrowR.parent = root;
+
+  return root;
+}
+
+export function createRangedReticleMesh(scene: Scene): TransformNode {
+  const root = new TransformNode(`ranged_reticle_${Date.now()}_${Math.random()}`, scene);
+
+  const reticleMat = palette.get(
+    scene,
+    'ranged_reticle_mat',
+    new Color3(0.95, 0.45, 0.1),
+    new Color3(1.0, 0.85, 0.4),
+    new Color3(0.9, 0.35, 0.05)
+  );
+  reticleMat.alpha = 0.8;
+
+  // Outer warning ring
+  const ring = MeshBuilder.CreateTorus('reticle_ring', {
+    diameter: 3.1,
+    thickness: 0.12,
+    tessellation: 32,
+  }, scene);
+  ring.material = reticleMat;
+  ring.position.y = 0.04;
+  ring.parent = root;
+
+  // Inner pulse ring
+  const innerRing = MeshBuilder.CreateTorus('reticle_inner_ring', {
+    diameter: 1.4,
+    thickness: 0.08,
+    tessellation: 24,
+  }, scene);
+  innerRing.material = reticleMat;
+  innerRing.position.y = 0.04;
+  innerRing.parent = root;
+
+  // Crosshair ticks
+  const crossH = MeshBuilder.CreateBox('reticle_cross_h', {
+    width: 2.8,
+    height: 0.03,
+    depth: 0.08,
+  }, scene);
+  crossH.material = reticleMat;
+  crossH.position.y = 0.04;
+  crossH.parent = root;
+
+  const crossV = MeshBuilder.CreateBox('reticle_cross_v', {
+    width: 0.08,
+    height: 0.03,
+    depth: 2.8,
+  }, scene);
+  crossV.material = reticleMat;
+  crossV.position.y = 0.04;
+  crossV.parent = root;
+
+  return root;
+}
+
+export function createSporeBombProjectileMesh(scene: Scene): TransformNode {
+  const root = new TransformNode(`spore_bomb_${Date.now()}_${Math.random()}`, scene);
+
+  const coreMat = palette.get(
+    scene,
+    'spore_bomb_core',
+    new Color3(0.95, 0.45, 0.1),
+    new Color3(1.0, 0.8, 0.3),
+    new Color3(0.9, 0.35, 0.05)
+  );
+  const crustMat = palette.get(
+    scene,
+    'spore_bomb_crust',
+    new Color3(0.28, 0.18, 0.1),
+    new Color3(0.3, 0.2, 0.1),
+    new Color3(0.15, 0.08, 0.04)
+  );
+  const cystMat = palette.get(
+    scene,
+    'spore_bomb_cysts',
+    new Color3(0.65, 0.95, 0.2),
+    new Color3(0.85, 1.0, 0.4),
+    new Color3(0.5, 0.85, 0.15)
+  );
+
+  // Heavy volcanic spore seed
+  const core = MeshBuilder.CreateSphere('bomb_core', {
+    diameter: 0.52,
+    segments: 16,
+  }, scene);
+  core.material = coreMat;
+  core.parent = root;
+
+  // Spiky crust ribs
+  const spikes = [
+    [0.32, 0, 0, 0, 0, -Math.PI / 2],
+    [-0.32, 0, 0, 0, 0, Math.PI / 2],
+    [0, 0.32, 0, 0, 0, 0],
+    [0, -0.32, 0, Math.PI, 0, 0],
+    [0, 0, 0.32, Math.PI / 2, 0, 0],
+    [0, 0, -0.32, -Math.PI / 2, 0, 0],
+    [0.22, 0.22, 0, 0, 0, -Math.PI / 4],
+    [-0.22, 0.22, 0, 0, 0, Math.PI / 4],
+  ];
+
+  spikes.forEach(([px, py, pz, rx, ry, rz], idx) => {
+    const spike = MeshBuilder.CreateCylinder(`bomb_spike_${idx}`, {
+      diameterTop: 0.02,
+      diameterBottom: 0.18,
+      height: 0.32,
+      tessellation: 8,
+    }, scene);
+    spike.material = crustMat;
+    spike.position.set(px, py, pz);
+    spike.rotation.set(rx, ry, rz);
+    spike.parent = root;
+  });
+
+  // Glowing toxic pustules
+  const pustules = [
+    [0.18, 0.18, 0.18],
+    [-0.18, 0.18, -0.18],
+    [0.18, -0.18, -0.18],
+    [-0.18, -0.18, 0.18],
+  ];
+  pustules.forEach(([cx, cy, cz], idx) => {
+    const cyst = MeshBuilder.CreateSphere(`bomb_cyst_${idx}`, {
+      diameter: 0.18,
+      segments: 10,
+    }, scene);
+    cyst.material = cystMat;
+    cyst.position.set(cx, cy, cz);
+    cyst.parent = root;
+  });
+
+  return root;
+}
+
+export function createToxicPoolMesh(scene: Scene): TransformNode {
+  const root = new TransformNode(`toxic_pool_${Date.now()}_${Math.random()}`, scene);
+
+  const poolMat = palette.get(
+    scene,
+    'toxic_pool_disc_mat',
+    new Color3(0.24, 0.58, 0.12),
+    new Color3(0.5, 0.9, 0.25),
+    new Color3(0.2, 0.5, 0.1)
+  );
+  poolMat.alpha = 0.72;
+
+  const rimMat = palette.get(
+    scene,
+    'toxic_pool_rim_mat',
+    new Color3(0.48, 0.78, 0.16),
+    new Color3(0.7, 1.0, 0.35),
+    new Color3(0.38, 0.68, 0.12)
+  );
+  rimMat.alpha = 0.88;
+
+  const cystMat = palette.get(
+    scene,
+    'toxic_pool_cyst_mat',
+    new Color3(0.65, 0.92, 0.2),
+    new Color3(0.85, 1.0, 0.4),
+    new Color3(0.5, 0.8, 0.15)
+  );
+
+  // Flat toxic slime pool on ground
+  const disc = MeshBuilder.CreateDisc('toxic_disc', {
+    radius: 1.55,
+    tessellation: 28,
+  }, scene);
+  disc.rotation.x = Math.PI / 2;
+  disc.position.y = 0.035;
+  disc.material = poolMat;
+  disc.parent = root;
+
+  // Glowing bubbling outer rim
+  const rim = MeshBuilder.CreateTorus('toxic_rim', {
+    diameter: 3.1,
+    thickness: 0.1,
+    tessellation: 32,
+  }, scene);
+  rim.material = rimMat;
+  rim.position.y = 0.04;
+  rim.parent = root;
+
+  // Bubbling toxic cysts on pool surface
+  const cystCoords = [
+    [-0.55, 0.06, -0.4, 0.32],
+    [0.6, 0.06, 0.35, 0.28],
+    [-0.2, 0.06, 0.65, 0.38],
+    [0.45, 0.06, -0.55, 0.26],
+  ];
+
+  cystCoords.forEach(([cx, cy, cz, diam], idx) => {
+    const cyst = MeshBuilder.CreateSphere(`pool_cyst_${idx}`, {
+      diameter: diam,
+      segments: 10,
+    }, scene);
+    cyst.scaling.y = 0.45;
+    cyst.material = cystMat;
+    cyst.position.set(cx, cy, cz);
+    cyst.parent = root;
+  });
+
+  return root;
 }

@@ -41,24 +41,26 @@ async function run() {
     return window.__gameStore?.getState().player.isAttacking;
   });
 
-  // Click canvas in center
-  await page.mouse.click(640, 360);
-  await page.evaluate(async () => {
-    for (let i = 0; i < 4; i++) {
-      window.__gameLoop?.tick(performance.now());
-      await new Promise((r) => setTimeout(r, 20));
-    }
+  // Register attack listener before clicking to avoid missing the fast attack cooldown on slower test environments
+  const attackPromise = page.evaluate(() => {
+    return new Promise((resolve) => {
+      let triggered = false;
+      const unsub = window.__gameStore.subscribe((state) => {
+        if (state.player.isAttacking || state.player.attackCooldown > 0) {
+          triggered = true;
+          unsub();
+          resolve(true);
+        }
+      });
+      setTimeout(() => resolve(triggered), 2500);
+    });
   });
 
-  const clickAttackState = await page.evaluate(() => {
-    const store = window.__gameStore?.getState();
-    return {
-      isAttacking: store.player.isAttacking,
-      cooldown: store.player.attackCooldown,
-    };
-  });
-  console.log('Click attack state:', clickAttackState);
-  if (!clickAttackState.isAttacking && clickAttackState.cooldown <= 0) {
+  // Click canvas in center
+  await page.mouse.click(640, 360);
+  const clickAttackTriggered = await attackPromise;
+
+  if (!clickAttackTriggered) {
     throw new Error('FAIL: Mouse click did not trigger sword attack!');
   }
   console.log('PASS: Mouse click triggered sword attack successfully!');
