@@ -40,7 +40,9 @@ import {
 import { useGameStore } from '../state/gameStore';
 import { soundManager } from '@/audio/soundManager';
 import { ParticleState, Vector2D, ProjectileState, GroundHazardState, ContextAction } from '@/types/game';
+import { EnemyAIContext } from './ai/types';
 import { updateGreenSlime } from './ai/greenSlimeAI';
+import { updateRedSlime } from './ai/redSlimeAI';
 
 class GameLoop {
   private isRunning: boolean = false;
@@ -865,36 +867,43 @@ class GameLoop {
     enemies.forEach((enemy) => {
       if (enemy.mapId !== store.currentMap) return;
 
-      if (enemy.type === 'slime_green') {
-        updateGreenSlime(enemy, {
-          dt,
-          player,
-          currentMap: store.currentMap,
-          currentMapData,
-          overworldMap: store.overworldMap,
-          dungeonMap: store.dungeonMap,
-          breakables,
-          isGateOpen: quest.dungeonGateOpen,
-          applyPlayerDamage: (damage, knockX, knockZ) => {
-            player.health = Math.max(0, player.health - damage);
-            player.iFrames = 1.2;
-            screenShake = 0.4;
-            damageFlash = 0.85;
-            soundManager.playPlayerHurt();
-            player.vx = knockX;
-            player.vz = knockZ;
+      const aiContext: EnemyAIContext = {
+        dt,
+        player,
+        currentMap: store.currentMap,
+        currentMapData,
+        overworldMap: store.overworldMap,
+        dungeonMap: store.dungeonMap,
+        breakables,
+        isGateOpen: quest.dungeonGateOpen,
+        applyPlayerDamage: (damage, knockX, knockZ) => {
+          player.health = Math.max(0, player.health - damage);
+          player.iFrames = 1.2;
+          screenShake = 0.4;
+          damageFlash = 0.85;
+          soundManager.playPlayerHurt();
+          player.vx = knockX;
+          player.vz = knockZ;
 
-            if (player.health <= 0) {
-              soundManager.stopMusic();
-              soundManager.playGameOver();
-              useGameStore.setState({
-                gameState: 'game_over',
-                player,
-                stats,
-              });
-            }
-          },
-        });
+          if (player.health <= 0) {
+            soundManager.stopMusic();
+            soundManager.playGameOver();
+            useGameStore.setState({
+              gameState: 'game_over',
+              player,
+              stats,
+            });
+          }
+        },
+      };
+
+      if (enemy.type === 'slime_green') {
+        updateGreenSlime(enemy, aiContext);
+        return;
+      }
+
+      if (enemy.type === 'slime_red') {
+        updateRedSlime(enemy, aiContext);
         return;
       }
 
@@ -977,12 +986,8 @@ class GameLoop {
       const isPlayerInSpawnSafeZone =
         store.currentMap === 'overworld' && playerDistToSpawn < SPAWN_SAFE_RADIUS;
 
-      const isBoss = enemy.type === 'boss_gorgoth';
-      const enemySettings = isBoss
-        ? ENEMY_SETTINGS.boss_gorgoth
-        : enemy.type === 'slime_red'
-        ? ENEMY_SETTINGS.slime_red
-        : ENEMY_SETTINGS.slime_green;
+      const isBoss = true;
+      const enemySettings = ENEMY_SETTINGS.boss_gorgoth;
 
       const aggroRadius = enemySettings.aggroRadius;
       const leashRadius = enemySettings.leashRadius;
